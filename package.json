@@ -1,0 +1,39 @@
+{
+  "name": "terminator",
+  "version": "1.0.0",
+  "description": "T-800 Audio System — retro MPC looper",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,red \"vite\" \"wait-on http://localhost:5173 && electron dist/main/main.js\"",
+    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "build": "vite build && tsc -p tsconfig.main.json",
+    "start": "electron dist/main/main.js",
+    "pack": "npm run build && electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "electron": "^41.3.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "electron-builder": "^26.8.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "com.terminator.audio",
+    "productName": "Terminator",
+    "files": ["dist/**/*"],
+    "directories": { "output": "release" }
+  }
+}
