@@ -44,13 +44,23 @@ function DBKnob({ label, value, defaultValue = 0, onChange }: { label: string; v
   );
 }
 
+// Log-mapped frequency slider: equal visual travel per octave so lows get
+// as much space as highs. Backed by a 0..STEPS linear range under the hood.
+const FREQ_MIN = 20;
+const FREQ_MAX = 20000;
+const FREQ_STEPS = 1000;
+const freqToFader = (hz: number) =>
+  Math.round(Math.log(Math.max(FREQ_MIN, hz) / FREQ_MIN) / Math.log(FREQ_MAX / FREQ_MIN) * FREQ_STEPS);
+const faderToFreq = (t: number) =>
+  FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t / FREQ_STEPS);
+
 function FreqKnob({ label, value, defaultValue, onChange }: { label: string; value: number; defaultValue: number; onChange: (v: number) => void }) {
   const display = value >= 1000 ? `${(value / 1000).toFixed(1)}k` : `${Math.round(value)}`;
   return (
-    <label className="knob-group" onDoubleClick={() => onChange(defaultValue)} title="Double-click to reset">
+    <label className="knob-group knob-group-wide" onDoubleClick={() => onChange(defaultValue)} title="Double-click to reset">
       <span className="knob-label">{label}</span>
-      <input type="range" className="knob-slider" min={20} max={20000} step={10} value={value}
-        onChange={e => onChange(Number(e.target.value))} />
+      <input type="range" className="knob-slider knob-slider-wide" min={0} max={FREQ_STEPS} step={1} value={freqToFader(value)}
+        onChange={e => onChange(Math.round(faderToFreq(Number(e.target.value))))} />
       <span className="knob-value">{display}Hz</span>
     </label>
   );
@@ -110,7 +120,7 @@ interface Props {
   onClipper:     (key: 'amount' | 'drive' | 'mix', v: number) => void;
   onWaveshaper:  (key: 'drive' | 'mix', v: number) => void;
   onSaturator:   (key: 'drive' | 'mix' | 'lowFreq' | 'highFreq', v: number) => void;
-  onOTT:         (key: 'depth' | 'mix', v: number) => void;
+  onCompressor:  (key: 'drive' | 'ratio' | 'attack' | 'release' | 'makeup', v: number) => void;
   onWidener:     (key: 'width' | 'mix', v: number) => void;
   onMSEQ:        (key: 'midFreq' | 'midGain' | 'sideFreq' | 'sideGain' | 'mix', v: number) => void;
   onChorus:      (key: 'rate' | 'depth' | 'mix', v: number) => void;
@@ -124,14 +134,14 @@ interface Props {
 const EFFECT_LABELS: Record<EffectKey, string> = {
   filter: 'FILTER',
   eq: 'EQ3', clipper: 'CLIPPER', waveshaper: 'WAVESHAPER',
-  saturator: 'MB SATURATOR', ott: 'OTT', widener: 'STEREO WIDTH',
+  saturator: 'MB SATURATOR', compressor: 'COMPRESSOR', widener: 'STEREO WIDTH',
   mseq: 'M/S EQ', chorus: 'CHORUS', delay: 'DELAY', reverb: 'REVERB',
   bitcrusher: 'BIT CRUSHER', autopan: 'AUTO PAN', trancegate: 'TRANCE GATE',
 };
 
 export function EffectsPanel({
   effects, onMasterBypass, onCollapse, onBypass, onReorder,
-  onFilter, onEQ, onClipper, onWaveshaper, onSaturator, onOTT, onWidener, onMSEQ, onChorus, onDelay, onReverb,
+  onFilter, onEQ, onClipper, onWaveshaper, onSaturator, onCompressor, onWidener, onMSEQ, onChorus, onDelay, onReverb,
   onBitCrusher, onAutoPan, onTranceGate,
 }: Props) {
   const dragIdxRef = useRef<number | null>(null);
@@ -208,10 +218,13 @@ export function EffectsPanel({
           <Knob label="LOW CUT"  value={e.saturator.lowFreq}  defaultValue={300}  min={60}  max={2000}  step={10} unit="Hz" onChange={v => onSaturator('lowFreq', v)} />
           <Knob label="HIGH CUT" value={e.saturator.highFreq} defaultValue={3000} min={500} max={16000} step={50} unit="Hz" onChange={v => onSaturator('highFreq', v)} />
         </>;
-      case 'ott':
+      case 'compressor':
         return <>
-          <Knob label="DEPTH" value={e.ott.depth} defaultValue={0.8} onChange={v => onOTT('depth', v)} />
-          <Knob label="MIX"   value={e.ott.mix}   defaultValue={0.5} onChange={v => onOTT('mix', v)} />
+          <Knob label="DRIVE"   value={e.compressor.drive}   defaultValue={0}    min={0}     max={24}  step={0.1}  unit=" dB" onChange={v => onCompressor('drive', v)} />
+          <Knob label="RATIO"   value={e.compressor.ratio}   defaultValue={4}    min={1}     max={20}  step={0.1}  unit=":1"  onChange={v => onCompressor('ratio', v)} />
+          <Knob label="ATTACK"  value={e.compressor.attack}  defaultValue={0.01} min={0.001} max={0.3} step={0.001} unit=" s" onChange={v => onCompressor('attack', v)} />
+          <Knob label="RELEASE" value={e.compressor.release} defaultValue={0.15} min={0.01}  max={1.0} step={0.01} unit=" s"  onChange={v => onCompressor('release', v)} />
+          <Knob label="MAKEUP"  value={e.compressor.makeup}  defaultValue={0}    min={-24}   max={24}  step={0.1}  unit=" dB" onChange={v => onCompressor('makeup', v)} />
         </>;
       case 'widener':
         return <>

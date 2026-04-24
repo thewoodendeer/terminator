@@ -14,7 +14,7 @@ export class MultibandSaturator {
   private _highFreq = 3000;
   private _bypassed = false;
 
-  constructor(ctx: AudioContext) {
+  constructor(ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.dryGain = ctx.createGain();

@@ -690,6 +690,8 @@ html, body, #root {
   cursor: pointer;
   accent-color: var(--neon3);
 }
+.knob-slider-wide { width: 160px; }
+.knob-group-wide  { min-width: 160px; }
 .knob-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 10px; height: 10px;
@@ -698,6 +700,49 @@ html, body, #root {
   box-shadow: 0 0 6px var(--neon3);
 }
 .knob-value { font-size: 8px; color: var(--neon3); }
+
+/* ── MPC card export ────────────────────────────────────────────────────── */
+.mpc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.mpc-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+.mpc-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #333;
+  border: 1px solid var(--border);
+}
+.mpc-dot-on {
+  background: var(--neon3);
+  box-shadow: 0 0 6px var(--neon3);
+  border-color: var(--neon3);
+}
+.mpc-status {
+  font-size: 8px;
+  color: var(--neon3);
+  word-break: break-all;
+}
+.btn-eject {
+  background: transparent;
+  border: 1px solid var(--border-neon);
+  color: var(--neon3);
+  letter-spacing: 2px;
+}
+.btn-eject:not(:disabled):hover {
+  background: rgba(0, 255, 136, 0.08);
+  border-color: var(--neon3);
+}
 
 /* ── Master Section ─────────────────────────────────────────────────────── */
 .master-section {

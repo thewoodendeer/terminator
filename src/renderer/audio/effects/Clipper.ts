@@ -11,7 +11,7 @@ export class Clipper {
   private _mix = 0.7;
   private _bypassed = false;
 
-  constructor(ctx: AudioContext) {
+  constructor(ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.preGain = ctx.createGain();

@@ -423,19 +423,19 @@ export class AudioEngine {
   async exportTrack(id: string, opts: ExportOptions): Promise<{ name: string; data: ArrayBuffer }> {
     const t = this.tracks.get(id);
     if (!t) throw new Error('Track not found');
-    return exportStem(t, this.loopDuration, opts);
+    return exportStem(t, this.loopDuration, this.bpm, opts);
   }
 
   async exportAllStems(opts: ExportOptions): Promise<Array<{ name: string; data: ArrayBuffer }>> {
     const results = [];
     for (const t of this.tracks.values()) {
-      if (t.buffer) results.push(await exportStem(t, this.loopDuration, opts));
+      if (t.buffer) results.push(await exportStem(t, this.loopDuration, this.bpm, opts));
     }
     return results;
   }
 
   async exportMaster(opts: ExportOptions): Promise<{ name: string; data: ArrayBuffer }> {
-    return exportMaster([...this.tracks.values()], this.loopDuration, opts);
+    return exportMaster([...this.tracks.values()], this.loopDuration, this.bpm, opts);
   }
 
   // ─── Undo / Redo ─────────────────────────────────────────────────────────
@@ -490,8 +490,13 @@ export class AudioEngine {
     t.waveshaper.setMix(e.waveshaper.mix);
     t.saturator.setDrive(e.saturator.drive);
     t.saturator.setMix(e.saturator.mix);
-    t.ott.setDepth(e.ott.depth);
-    t.ott.setMix(e.ott.mix);
+    if (e.compressor) {
+      t.compressor.setDrive(e.compressor.drive);
+      t.compressor.setRatio(e.compressor.ratio);
+      t.compressor.setAttack(e.compressor.attack);
+      t.compressor.setRelease(e.compressor.release);
+      t.compressor.setMakeup(e.compressor.makeup);
+    }
     t.widener.setWidth(e.widener.width);
     t.widener.setMix(e.widener.mix);
     t.mseq.setMidGain(e.mseq.midGain);

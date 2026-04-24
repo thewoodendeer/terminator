@@ -8,13 +8,18 @@ interface Props {
   onLimiter:      (v: boolean) => void;
   onExportStems:  (format: ExportFormat, bitDepth: WAVBitDepth, dry: boolean) => void;
   onExportMaster: (format: ExportFormat, bitDepth: WAVBitDepth, dry: boolean) => void;
+  mpcExportDir:   string | null;
+  onExportToMpc:  (format: ExportFormat, bitDepth: WAVBitDepth, dry: boolean) => Promise<{ savedTo?: string; error?: string }>;
+  onEjectMpc:     () => Promise<{ ok?: true; error?: string }>;
 }
 
-export function MasterSection({ masterVolume, limiterEnabled, onMasterVolume, onLimiter, onExportStems, onExportMaster }: Props) {
+export function MasterSection({ masterVolume, limiterEnabled, onMasterVolume, onLimiter, onExportStems, onExportMaster, mpcExportDir, onExportToMpc, onEjectMpc }: Props) {
   const [format, setFormat]       = useState<ExportFormat>('wav');
   const [bitDepth, setBitDepth]   = useState<WAVBitDepth>(24);
   const [dry, setDry]             = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [mpcStatus, setMpcStatus] = useState<string | null>(null);
+  const [ejecting, setEjecting]   = useState(false);
 
   const handleExportStems = async () => {
     setExporting(true);
@@ -26,6 +31,26 @@ export function MasterSection({ masterVolume, limiterEnabled, onMasterVolume, on
     setExporting(true);
     try { await onExportMaster(format, bitDepth, dry); }
     finally { setExporting(false); }
+  };
+
+  const handleExportToMpc = async () => {
+    setExporting(true);
+    setMpcStatus(null);
+    try {
+      const res = await onExportToMpc(format, bitDepth, dry);
+      setMpcStatus(res.error ? `ERR: ${res.error}` : `SAVED → ${res.savedTo}`);
+      setTimeout(() => setMpcStatus(null), 4000);
+    } finally { setExporting(false); }
+  };
+
+  const handleEjectMpc = async () => {
+    setEjecting(true);
+    setMpcStatus(null);
+    try {
+      const res = await onEjectMpc();
+      setMpcStatus(res.error ? `EJECT FAILED: ${res.error}` : 'SAFE TO REMOVE');
+      setTimeout(() => setMpcStatus(null), 4000);
+    } finally { setEjecting(false); }
   };
 
   return (
@@ -95,6 +120,31 @@ export function MasterSection({ masterVolume, limiterEnabled, onMasterVolume, on
           <button className={`btn btn-export ${exporting ? 'loading' : ''}`} onClick={handleExportMaster} disabled={exporting}>
             {exporting ? 'RENDERING…' : '⬇ MASTER'}
           </button>
+        </div>
+
+        <div className="mpc-section">
+          <div className="mpc-indicator" title={mpcExportDir ?? 'No MPC card detected'}>
+            {mpcExportDir
+              ? <><span className="mpc-dot mpc-dot-on" /> MPC → {mpcExportDir}</>
+              : <><span className="mpc-dot" /> MPC: not detected</>}
+          </div>
+          <button
+            className={`btn btn-export ${exporting ? 'loading' : ''}`}
+            onClick={handleExportToMpc}
+            disabled={exporting || ejecting || !mpcExportDir}
+            title={mpcExportDir ? `Export all stems to ${mpcExportDir}` : 'Plug MPC in SD-card access mode'}
+          >
+            {exporting ? 'RENDERING…' : '⇨ EXPORT TO MPC'}
+          </button>
+          <button
+            className={`btn btn-eject ${ejecting ? 'loading' : ''}`}
+            onClick={handleEjectMpc}
+            disabled={exporting || ejecting || !mpcExportDir}
+            title={mpcExportDir ? 'Safely eject the MPC card before unplugging' : 'No MPC card to eject'}
+          >
+            {ejecting ? 'EJECTING…' : '⏏ EJECT MPC'}
+          </button>
+          {mpcStatus && <div className="mpc-status">{mpcStatus}</div>}
         </div>
       </div>
     </div>

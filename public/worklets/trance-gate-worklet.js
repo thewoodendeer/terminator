@@ -5,7 +5,6 @@ class TranceGateProcessor extends AudioWorkletProcessor {
       { name: 'depth',   defaultValue: 1,     minValue: 0,     maxValue: 1,   automationRate: 'k-rate' },
       { name: 'attack',  defaultValue: 0.005, minValue: 0.001, maxValue: 0.5, automationRate: 'k-rate' },
       { name: 'release', defaultValue: 0.08,  minValue: 0.001, maxValue: 0.5, automationRate: 'k-rate' },
-      { name: 'mix',     defaultValue: 1,     minValue: 0,     maxValue: 1,   automationRate: 'k-rate' },
     ];
   }
 
@@ -18,22 +17,20 @@ class TranceGateProcessor extends AudioWorkletProcessor {
   process(inputs, outputs, parameters) {
     const input  = inputs[0];
     const output = outputs[0];
-    if (!input[0]) return true;
+    if (!input || !input[0]) return true;
 
     const rate    = parameters.rate[0];
     const depth   = parameters.depth[0];
     const attack  = parameters.attack[0];
     const release = parameters.release[0];
-    const mix     = parameters.mix[0];
 
-    const phaseInc      = rate / sampleRate;
-    const attackCoeff   = 1 / (attack  * sampleRate);
-    const releaseCoeff  = 1 / (release * sampleRate);
+    const phaseInc     = rate / sampleRate;
+    const attackCoeff  = 1 / (attack  * sampleRate);
+    const releaseCoeff = 1 / (release * sampleRate);
 
     const frameSize = input[0].length;
 
     for (let i = 0; i < frameSize; i++) {
-      // Gate open for first 50 % of each cycle
       const gateOpen = this._phase < 0.5 ? 1 : 0;
 
       if (gateOpen) {
@@ -48,9 +45,7 @@ class TranceGateProcessor extends AudioWorkletProcessor {
         const inCh  = input[ch]  || input[0];
         const outCh = output[ch] || output[0];
         if (!outCh) continue;
-
-        const x = inCh[i];
-        outCh[i] = x * (1 - mix) + x * gateGain * mix;
+        outCh[i] = inCh[i] * gateGain;
       }
 
       this._phase += phaseInc;

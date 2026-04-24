@@ -10,7 +10,7 @@ export class Reverb {
   private _decay = 2.0;
   private _bypassed = false;
 
-  constructor(private ctx: AudioContext) {
+  constructor(private ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.convolver = ctx.createConvolver();

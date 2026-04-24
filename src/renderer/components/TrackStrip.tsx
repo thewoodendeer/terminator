@@ -25,7 +25,7 @@ interface Props {
   onClipper:      (key: 'amount' | 'drive' | 'mix', v: number) => void;
   onWaveshaper:   (key: 'drive' | 'mix', v: number) => void;
   onSaturator:    (key: 'drive' | 'mix' | 'lowFreq' | 'highFreq', v: number) => void;
-  onOTT:          (key: 'depth' | 'mix', v: number) => void;
+  onCompressor:   (key: 'drive' | 'ratio' | 'attack' | 'release' | 'makeup', v: number) => void;
   onWidener:      (key: 'width' | 'mix', v: number) => void;
   onReverse:      () => void;
   onMidiArm:      () => void;
@@ -49,7 +49,7 @@ export function TrackStrip({
   onDuplicate, onRemove, onRename, onStretch, onPitch, onLoopStart, onReverse,
   onMidiArm, onRootNote,
   onFilter,
-  onEQ, onClipper, onWaveshaper, onSaturator, onOTT, onWidener, onMSEQ,
+  onEQ, onClipper, onWaveshaper, onSaturator, onCompressor, onWidener, onMSEQ,
   onChorus, onDelay, onReverb, onBitCrusher, onAutoPan, onTranceGate,
   onBypassFX, onMasterBypass, onReorderFX,
 }: Props) {
@@ -429,7 +429,7 @@ export function TrackStrip({
           onClipper={onClipper}
           onWaveshaper={onWaveshaper}
           onSaturator={onSaturator}
-          onOTT={onOTT}
+          onCompressor={onCompressor}
           onWidener={onWidener}
           onMSEQ={onMSEQ}
           onChorus={onChorus}

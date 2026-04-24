@@ -6,7 +6,7 @@ export class StereoWidener {
   private _mix = 0.5;
   private _bypassed = false;
 
-  constructor(private ctx: AudioContext) {
+  constructor(private ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.input.connect(this.output); // fallback passthrough until worklet loads

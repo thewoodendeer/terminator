@@ -12,6 +12,9 @@ import { MasterSection } from './components/MasterSection';
 const ipc = (window as any).terminator as {
   exportStem:     (p: { name: string; data: ArrayBuffer }) => Promise<any>;
   exportAllStems: (stems: Array<{ name: string; data: ArrayBuffer }>) => Promise<any>;
+  exportToMpc:    (stems: Array<{ name: string; data: ArrayBuffer }>) => Promise<{ savedTo?: string; saved?: string[]; error?: string }>;
+  ejectMpc:       () => Promise<{ ok?: true; error?: string }>;
+  onMpcStatus:    (handler: (mountpoint: string | null) => void) => () => void;
 } | undefined;
 
 const DEFAULT_STATE: EngineState = {
@@ -38,6 +41,12 @@ export default function App() {
   }, []);
 
   const engine = engineRef.current;
+
+  const [mpcExportDir, setMpcExportDir] = useState<string | null>(null);
+  useEffect(() => {
+    if (!ipc?.onMpcStatus) return;
+    return ipc.onMpcStatus(setMpcExportDir);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -82,6 +91,18 @@ export default function App() {
     }
   }, [engine]);
 
+  const handleExportToMpc = useCallback(async (format: ExportFormat, bitDepth: WAVBitDepth, dry: boolean): Promise<{ savedTo?: string; error?: string }> => {
+    if (!engine || !ipc?.exportToMpc) return { error: 'IPC unavailable' };
+    const stems = await engine.exportAllStems({ format, bitDepth, dry });
+    const res = await ipc.exportToMpc(stems);
+    return res;
+  }, [engine]);
+
+  const handleEjectMpc = useCallback(async (): Promise<{ ok?: true; error?: string }> => {
+    if (!ipc?.ejectMpc) return { error: 'IPC unavailable' };
+    return ipc.ejectMpc();
+  }, []);
+
   const trackHandlers = useCallback((id: string) => ({
     onVolume:    (v: number) => engine?.setTrackVolume(id, v),
     onPan:       (v: number) => engine?.setTrackPan(id, v),
@@ -118,8 +139,14 @@ export default function App() {
         if (key === 'lowFreq')  t.saturator.setLowFreq(v);
         if (key === 'highFreq') t.saturator.setHighFreq(v);
       }),
-    onOTT: (key: 'depth' | 'mix', v: number) =>
-      engine?.setTrackEffect(id, t => key === 'depth' ? t.ott.setDepth(v) : t.ott.setMix(v)),
+    onCompressor: (key: 'drive' | 'ratio' | 'attack' | 'release' | 'makeup', v: number) =>
+      engine?.setTrackEffect(id, t => {
+        if (key === 'drive')   t.compressor.setDrive(v);
+        if (key === 'ratio')   t.compressor.setRatio(v);
+        if (key === 'attack')  t.compressor.setAttack(v);
+        if (key === 'release') t.compressor.setRelease(v);
+        if (key === 'makeup')  t.compressor.setMakeup(v);
+      }),
     onWidener: (key: 'width' | 'mix', v: number) =>
       engine?.setTrackEffect(id, t => key === 'width' ? t.widener.setWidth(v) : t.widener.setMix(v)),
     onFilter: (key: 'type' | 'freq' | 'q' | 'mix', v: FilterType | number) =>
@@ -256,6 +283,9 @@ export default function App() {
           onLimiter={(v) => engine?.setLimiterEnabled(v)}
           onExportStems={handleExportStems}
           onExportMaster={handleExportMaster}
+          mpcExportDir={mpcExportDir}
+          onExportToMpc={handleExportToMpc}
+          onEjectMpc={handleEjectMpc}
         />
       </div>
     </div>

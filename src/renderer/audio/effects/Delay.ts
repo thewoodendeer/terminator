@@ -16,7 +16,7 @@ export class Delay {
   private _pingPong = false;
   private _bypassed = false;
 
-  constructor(private ctx: AudioContext) {
+  constructor(private ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.merger = ctx.createChannelMerger(2);

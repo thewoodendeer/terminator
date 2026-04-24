@@ -77,30 +77,18 @@ function writeStr(view: DataView, offset: number, str: string) {
 export async function exportStem(
   track: Track,
   loopDuration: number,
+  bpm: number,
   opts: ExportOptions
 ): Promise<{ name: string; data: ArrayBuffer }> {
   if (!track.buffer) throw new Error('Track has no audio');
 
-  let buf: AudioBuffer;
-
-  if (opts.dry) {
-    buf = track.buffer;
-  } else {
-    // Render through effects using OfflineAudioContext
-    const sr = track.buffer.sampleRate;
-    const len = Math.ceil(loopDuration * sr);
-    const offCtx = new OfflineAudioContext(2, len, sr);
-
-    const src = offCtx.createBufferSource();
-    src.buffer = track.buffer;
-    src.loop = true;
-    src.loopEnd = track.buffer.duration;
-    src.playbackRate.value = track.timeStretch;
-    src.connect(offCtx.destination);
-    src.start(0);
-
-    buf = await offCtx.startRendering();
-  }
+  // Dry export: the raw unaltered recording, bypassing stretch, pitch, FX, and
+  // track volume/pan. Useful for saving the source take.
+  // Wet export: render through the full effects chain with stretch + pitch
+  // baked in, track volume/pan applied.
+  const buf = opts.dry
+    ? track.buffer
+    : await track.renderOffline(loopDuration, bpm);
 
   const data = encodeWAV(buf, opts.bitDepth);
   return { name: track.name.replace(/\s+/g, '_'), data };
@@ -109,32 +97,36 @@ export async function exportStem(
 export async function exportMaster(
   tracks: Track[],
   loopDuration: number,
+  bpm: number,
   opts: ExportOptions
 ): Promise<{ name: string; data: ArrayBuffer }> {
-  const sr = tracks[0]?.buffer?.sampleRate ?? 44100;
-  const len = Math.ceil(loopDuration * sr);
-  const offCtx = new OfflineAudioContext(2, len, sr);
-
-  for (const track of tracks) {
-    if (!track.buffer || track.muted) continue;
-    const src = offCtx.createBufferSource();
-    src.buffer = track.buffer;
-    src.loop = true;
-    src.loopEnd = track.buffer.duration;
-    src.playbackRate.value = track.timeStretch;
-
-    const gain = offCtx.createGain();
-    gain.gain.value = track.volume;
-    const pan = offCtx.createStereoPanner();
-    pan.pan.value = track.pan;
-
-    src.connect(gain);
-    gain.connect(pan);
-    pan.connect(offCtx.destination);
-    src.start(0);
+  // Render each non-muted track individually through its FX chain, then sum
+  // into a master buffer. Respects solo (any soloed track mutes the rest).
+  const anySoloed = tracks.some(t => t.soloed);
+  const active = tracks.filter(t => t.buffer && !t.muted && (!anySoloed || t.soloed));
+  if (active.length === 0) {
+    const sr = tracks[0]?.buffer?.sampleRate ?? 44100;
+    const empty = new AudioContext().createBuffer(2, Math.ceil(loopDuration * sr), sr);
+    return { name: 'MASTER', data: encodeWAV(empty, opts.bitDepth) };
   }
 
-  const buf = await offCtx.startRendering();
-  const data = encodeWAV(buf, opts.bitDepth);
+  const stems = opts.dry
+    ? active.map(t => t.buffer!)  // dry = raw buffers, no fx/stretch/pitch
+    : await Promise.all(active.map(t => t.renderOffline(loopDuration, bpm)));
+
+  const sr  = stems[0].sampleRate;
+  const len = Math.ceil(loopDuration * sr);
+  // Sum samples into a single stereo buffer
+  const out = new AudioContext().createBuffer(2, len, sr);
+  for (let ch = 0; ch < 2; ch++) {
+    const dst = out.getChannelData(ch);
+    for (const s of stems) {
+      const srcCh = s.numberOfChannels > ch ? s.getChannelData(ch) : s.getChannelData(0);
+      const limit = Math.min(len, srcCh.length);
+      for (let i = 0; i < limit; i++) dst[i] += srcCh[i];
+    }
+  }
+
+  const data = encodeWAV(out, opts.bitDepth);
   return { name: 'MASTER', data };
 }

@@ -13,7 +13,7 @@ export class AutoPan {
   private _bypassed = false;
   private _shape: OscillatorType = 'sine';
 
-  constructor(private ctx: AudioContext) {
+  constructor(private ctx: BaseAudioContext) {
     this.input   = ctx.createGain();
     this.output  = ctx.createGain();
     this.panner  = ctx.createStereoPanner();

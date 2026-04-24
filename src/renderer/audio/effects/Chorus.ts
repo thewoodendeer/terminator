@@ -11,7 +11,7 @@ export class Chorus {
   private _mix = 0.35;
   private _bypassed = false;
 
-  constructor(private ctx: AudioContext) {
+  constructor(private ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.delay = ctx.createDelay(0.1);

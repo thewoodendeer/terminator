@@ -8,7 +8,7 @@ export class Waveshaper {
   private _mix = 0.5;
   private _bypassed = false;
 
-  constructor(ctx: AudioContext) {
+  constructor(ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.shaper = ctx.createWaveShaper();

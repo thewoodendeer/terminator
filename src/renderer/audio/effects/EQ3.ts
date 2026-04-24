@@ -11,7 +11,7 @@ export class EQ3 {
   private _highGain = 0;
   private _bypassed = false;
 
-  constructor(ctx: AudioContext) {
+  constructor(ctx: BaseAudioContext) {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.dryGain = ctx.createGain();
