@@ -51,6 +51,41 @@ The product vision is changing. The loop-sampler architecture below is the **sta
 
 ---
 
+## Chopper Mode — current build
+
+The chopper is live alongside the looper. App.tsx renders a top tab bar (`CHOPPER` / `LOOPER`); chopper is the default.
+
+### Architecture
+
+- `src/main/youtubeDownloader.ts` — shells out to `yt-dlp -f bestaudio` and returns the audio file as an `ArrayBuffer` plus title/duration/videoId. **No ffmpeg dependency** (we keep the native m4a/opus stream and let `decodeAudioData` handle it). Looks for yt-dlp in PATH and the WinGet user-scope Links dir.
+- `src/main/playlists.ts` — reads `data/playlist*.json` (NDJSON or JSON-array — both work; that's the format yt-dlp's `--dump-json` emits). Each entry is `{id, title, duration?}`.
+- `src/main/main.ts` — IPC handlers: `chopper:listPlaylists`, `chopper:downloadYouTube`. The data dir is `<repo>/data` in dev (`__dirname/../../data`) and `process.resourcesPath/data` in a packaged build.
+- `src/preload/preload.ts` — exposes `listPlaylists()` and `downloadYouTube(idOrUrl)`.
+- `src/renderer/chopper/ChopperEngine.ts` — owns its own `AudioContext`, master FX chain (Filter → EQ3 → parallel-mixed Compressor → Delay → Reverb → masterGain → masterLimiter), 16 pads, chop list, voices, timeline recording. `triggerPad/releasePad` for live performance, `exportMaster/exportChops` for offline render via `OfflineAudioContext` mirroring the live FX chain. Compressor exposes 5 style presets (`off/light/punchy/ny/aggressive`) plus a user-controlled mix (NY = parallel default 50%).
+- `src/renderer/chopper/PadGrid.tsx` — 4×4 grid; right-click pad to enter assignment mode (then click a chop region on the waveform to assign); left-click to trigger; small ▶/∞ button to toggle one-shot/loop. Keyboard layout: row 0=`1234`, row 1=`QWER`, row 2=`ASDF`, row 3=`ZXCV`. Window-level keyboard listener that ignores key repeat and skips when typing in inputs.
+- `src/renderer/chopper/WaveformView.tsx` — full-track canvas with chop region shading, boundary lines, pad-color number tags, BPM ruler when known. Drag chop boundaries by grabbing within 8px of a vertical line. Click a region to preview the assigned pad (or to assign when a pad is selected).
+- `src/renderer/chopper/MasterFXPanel.tsx` — knobs/sliders for Filter (log-mapped wide cutoff slider), EQ low/mid/high, Compressor style + mix, Delay time/feedback/mix, Reverb decay/mix.
+- `src/renderer/chopper/Timeline.tsx` — visual stack of recorded triggers; ARM/REC/CLEAR controls. Empty timeline triggers a default fall-back render (pads in order, back-to-back) when exporting master.
+- `src/renderer/chopper/bpmDetect.ts` — onset-energy + autocorrelation BPM estimator. ~6 kHz decimation, half-wave-rectified envelope difference, autocorrelate over the 60–200 BPM lag range, pick the strongest peak, snap to 75–160 by halving/doubling. Decent for breakbeats / soul / lofi; not as good as Essentia.js but no WASM dep.
+
+### Chopper UX
+
+- **Get Sample**: select playlist → click → random track pulled, BPM auto-detected, 16 equal-slice chops auto-created, chops auto-assigned to pads 1–16.
+- **Custom URL**: Enter a YouTube URL in the toolbar input; same flow as Get Sample but for a specific track.
+- **Trigger pads**: keyboard rows or mouse click. Loop pads keep playing until released (mouse-up / key-up); one-shots play to chop end.
+- **Re-assign**: right-click a pad → it pulses purple (selected) → click a chop region on the waveform → assignment lands. Press Esc to cancel.
+- **Adjust chops**: drag a chop's start or end boundary on the waveform.
+- **Export Master**: renders the recorded timeline (or a default fall-back if none) through the master FX chain into a single WAV. Lands on the MPC card in the existing `<card>/<MPC>/Samples/User/TERMINATOR/` if detected, else save dialog.
+- **Export Chops**: renders each assigned pad's chop through the same FX chain, named `<title>_<bpm>BPM_padNN`. Same MPC-or-dialog destination.
+
+### Setup gotchas
+
+- **yt-dlp must be installed.** `winget install yt-dlp.yt-dlp` (user-scope is fine) or `choco install yt-dlp`. Restart the dev process after installing so the new PATH is picked up.
+- **No ffmpeg required.** We deliberately use `-f bestaudio` (no `--audio-format wav`) so yt-dlp doesn't need ffmpeg. Browser `decodeAudioData` handles m4a/opus/aac natively.
+- **Playlist data location:** `data/playlist*.json` at repo root. Files are read by main process via fs (not by Vite as static assets), so they don't need to live under `public/`.
+
+---
+
 ## Architecture
 
 - `src/renderer/audio/AudioEngine.ts` — Central engine: manages tracks, BPM, bars, swing, quantize, undo/redo, MIDI routing, master volume/limiter, pre-count logic. Delegates to `LoopRecorder`, `Quantizer`, `StemExporter`

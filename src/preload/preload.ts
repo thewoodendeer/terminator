@@ -13,4 +13,9 @@ contextBridge.exposeInMainWorld('terminator', {
     ipcRenderer.on('mpc:status', listener);
     return () => ipcRenderer.removeListener('mpc:status', listener);
   },
+
+  // ── Chopper feature ───────────────────────────────────────────────────────
+  listPlaylists: () => ipcRenderer.invoke('chopper:listPlaylists'),
+  downloadYouTube: (idOrUrl: string) =>
+    ipcRenderer.invoke('chopper:downloadYouTube', idOrUrl),
 });

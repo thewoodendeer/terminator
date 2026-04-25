@@ -7,6 +7,8 @@ const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const mpcDetector_1 = require("./mpcDetector");
+const youtubeDownloader_1 = require("./youtubeDownloader");
+const playlists_1 = require("./playlists");
 const isDev = process.env.NODE_ENV !== 'production' && !electron_1.app.isPackaged;
 const MPC_POLL_MS = 2000;
 // Full export directory (ends in `terminator`) — resolved by the detector to
@@ -140,6 +142,24 @@ electron_1.ipcMain.handle('mpc:eject', async () => {
     }
     finally {
         ejectInProgress = false;
+    }
+});
+// IPC: list playlists from /data/playlist*.json
+electron_1.ipcMain.handle('chopper:listPlaylists', async () => {
+    const dataDir = electron_1.app.isPackaged
+        ? path_1.default.join(process.resourcesPath, 'data')
+        : path_1.default.join(__dirname, '..', '..', 'data');
+    return (0, playlists_1.loadPlaylists)(dataDir);
+});
+// IPC: download a YouTube video's audio via yt-dlp; returns ArrayBuffer of
+// raw WAV plus title/duration for the renderer to decode.
+electron_1.ipcMain.handle('chopper:downloadYouTube', async (_event, idOrUrl) => {
+    try {
+        const result = await (0, youtubeDownloader_1.downloadYouTubeAudio)(idOrUrl);
+        return { ok: true, ...result };
+    }
+    catch (e) {
+        return { ok: false, error: e?.message ?? String(e) };
     }
 });
 // IPC: dump all stems into the detected MPC export directory (typically

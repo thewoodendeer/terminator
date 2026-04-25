@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog, session } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { findMpcExportDir, ejectDriveForExportDir } from './mpcDetector';
+import { downloadYouTubeAudio } from './youtubeDownloader';
+import { loadPlaylists } from './playlists';
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 
@@ -136,6 +138,25 @@ ipcMain.handle('mpc:eject', async () => {
     return res.ok ? { ok: true } : { error: res.error };
   } finally {
     ejectInProgress = false;
+  }
+});
+
+// IPC: list playlists from /data/playlist*.json
+ipcMain.handle('chopper:listPlaylists', async () => {
+  const dataDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'data')
+    : path.join(__dirname, '..', '..', 'data');
+  return loadPlaylists(dataDir);
+});
+
+// IPC: download a YouTube video's audio via yt-dlp; returns ArrayBuffer of
+// raw WAV plus title/duration for the renderer to decode.
+ipcMain.handle('chopper:downloadYouTube', async (_event, idOrUrl: string) => {
+  try {
+    const result = await downloadYouTubeAudio(idOrUrl);
+    return { ok: true, ...result };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
   }
 });
 

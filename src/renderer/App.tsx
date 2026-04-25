@@ -8,6 +8,31 @@ import { Transport } from './components/Transport';
 import { TrackStrip } from './components/TrackStrip';
 import { WaveformDisplay } from './components/WaveformDisplay';
 import { MasterSection } from './components/MasterSection';
+import { ChopperView } from './chopper/ChopperView';
+
+type AppMode = 'chopper' | 'looper';
+
+export default function App() {
+  const [mode, setMode] = useState<AppMode>('chopper');
+  return (
+    <>
+      <div className="app-mode-bar">
+        <span className="brand">T-800</span>
+        <div className="mode-tabs">
+          <button
+            className={`mode-tab ${mode === 'chopper' ? 'active' : ''}`}
+            onClick={() => setMode('chopper')}
+          >CHOPPER</button>
+          <button
+            className={`mode-tab ${mode === 'looper' ? 'active' : ''}`}
+            onClick={() => setMode('looper')}
+          >LOOPER</button>
+        </div>
+      </div>
+      {mode === 'chopper' ? <ChopperView /> : <LooperView />}
+    </>
+  );
+}
 
 const ipc = (window as any).terminator as {
   exportStem:     (p: { name: string; data: ArrayBuffer }) => Promise<any>;
@@ -27,7 +52,7 @@ const DEFAULT_STATE: EngineState = {
 
 type SpectrumMode = 'waveform' | 'spectrum';
 
-export default function App() {
+function LooperView() {
   const engineRef = useRef<AudioEngine | null>(null);
   const [state, setState] = useState<EngineState>(DEFAULT_STATE);
   const [specMode, setSpecMode] = useState<SpectrumMode>('waveform');
