@@ -1,0 +1,6 @@
+- [Pivot in progress](project_pivot_2026.md) — Terminator → YouTube sample chopper + 4×4 pad sampler; prototyping inside the existing Electron app first
+- [User profile — Killavic](user_killavic.md) — music producer, MPC Sample owner, Windows; speak DSP terms directly
+- [Environment quirks](user_environment_quirks.md) — `ELECTRON_RUN_AS_NODE=1` set globally; PowerShell ExecutionPolicy RemoteSigned
+- [Communication style](feedback_terse_action.md) — terse responses, single recommendation; auto mode is normal
+- [Commit style](feedback_commit_style.md) — lowercase imperative, no conventional-commits prefixes, bullet body
+- [In-repo architecture doc](reference_in_repo_memory.md) — `CLAUDE_MEMORY.md` is canonical; read first, keep current
