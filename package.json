@@ -11,8 +11,13 @@
     "pack": "npm run build && electron-builder"
   },
   "keywords": [],
-  "author": "",
+  "author": "thewoodendeer",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thewoodendeer/terminator.git"
+  },
+  "homepage": "https://github.com/thewoodendeer/terminator",
   "type": "commonjs",
   "dependencies": {
     "electron": "^41.3.0",

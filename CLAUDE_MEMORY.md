@@ -2,11 +2,14 @@
 name: TERMINATOR PROJECT
 description: Electron-based audio looper/sampler with Web Audio API, React frontend, full effects chain, and MIDI input
 type: project
+github: https://github.com/thewoodendeer/terminator
 originSessionId: a69a1c0d-f8c5-4cd7-ac10-35d7ce6c4179
 ---
 # TERMINATOR PROJECT
 
 Electron + React + Web Audio API audio looper/sampler. Cross-platform; current working checkout is at `c:\Users\ellio\Git Repos\terminator` (Windows).
+
+**GitHub:** https://github.com/thewoodendeer/terminator
 
 **Why:** Personal music production tool — a loop-based sampler with a full per-track FX chain, MIDI chromatic playback, and stem export.
 
