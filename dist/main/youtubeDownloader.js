@@ -14,10 +14,12 @@ const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
  *  to the common Windows install paths. Returns the resolved command string
  *  to pass to spawn, or null if nothing's available. */
 async function findYtDlp() {
+    const home = os_1.default.homedir();
     const candidates = [
         'yt-dlp',
         'yt-dlp.exe',
-        path_1.default.join(os_1.default.homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
+        path_1.default.join(home, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
+        path_1.default.join(home, 'scoop', 'shims', 'yt-dlp.exe'),
         'C:\\ProgramData\\chocolatey\\bin\\yt-dlp.exe',
     ];
     for (const c of candidates) {
@@ -27,6 +29,23 @@ async function findYtDlp() {
         }
         catch { /* try next */ }
     }
+    // Last-resort fallback: WinGet user-scope sometimes installs without
+    // creating a symlink in Links/. Scan the Packages dir for the actual exe.
+    try {
+        const pkgRoot = path_1.default.join(home, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Packages');
+        const entries = await fs_1.promises.readdir(pkgRoot, { withFileTypes: true });
+        for (const e of entries) {
+            if (!e.isDirectory() || !/^yt-dlp/i.test(e.name))
+                continue;
+            const probe = path_1.default.join(pkgRoot, e.name, 'yt-dlp.exe');
+            try {
+                await execFileAsync(probe, ['--version']);
+                return probe;
+            }
+            catch { /* try next */ }
+        }
+    }
+    catch { /* WinGet not present */ }
     return null;
 }
 /** Download the audio for a YouTube video ID (or full URL) as a WAV file in
