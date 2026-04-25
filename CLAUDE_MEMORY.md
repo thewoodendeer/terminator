@@ -17,6 +17,40 @@ Electron + React + Web Audio API audio looper/sampler. Cross-platform; current w
 
 ---
 
+## ⚠️ PIVOT IN PROGRESS (2026-04-25)
+
+The product vision is changing. The loop-sampler architecture below is the **starting point we are prototyping inside**, not the destination.
+
+**New direction:** YouTube sample chopper + MPC-style 4×4 pad sampler. Curated YouTube playlists (`/public/data/*.json`, output of `yt-dlp --dump-json`) → random track pull → BPM detection → waveform display (2-bar grid, 4-bar viewport) → auto/manual chops → assign chops to 4×4 pads (one-shot or loop) → trigger via MIDI / keyboard QWER rows / mouse → triggered hits stack on a timeline → master FX (filter, 3-band EQ, compressor with style-preset dropdown, delay, reverb, phaser, flanger, tape) → export master mix or individual labeled chops.
+
+**Where work happens:** Inside this Electron repo for now. Killavic will fork to a fresh React+Vite webapp once the flow is validated.
+
+**What carries over from the loop sampler:**
+- Effect classes (`Filter`, `EQ3`, `Compressor`, `Delay`, `Reverb`, `Phaser` if added) — they already accept `BaseAudioContext` so they work in OfflineAudioContext for export.
+- `Track.renderOffline` pattern (chop preview / export rendering)
+- `WaveformDisplay` component (with extension for chop markers + drag handles)
+- MPC card detection + eject + export to `/Samples/User/TERMINATOR` (use this for chop export too)
+- `StemExporter` WAV encoder
+- AudioWorklet wiring (the publicDir gotcha and worklet-init pattern)
+
+**What gets transformed or removed:**
+- Multi-track loop record/overdub flow → single-source workflow (one YouTube track at a time)
+- Per-track FX panel → master FX only
+- Bar-accurate retrigger scheduler → not needed; pads are triggered ad-hoc and arranged on a timeline
+- TrackStrip → replaced by the pad grid + timeline
+- Time-stretch/pitch knobs (per-track) → optional per-pad; stretch already pitch-preserving via soundtouchjs
+- MIDI chromatic playback → keep MIDI input, but route to pad triggers (not chromatic per-track)
+
+**Compressor note:** target UX has a single MIX knob plus a dropdown for compressor "style" (light, punchy, NY comp, aggressive). Implementation idea: keep our drive-style `Compressor` and have the dropdown set DRIVE/RATIO/ATTACK/RELEASE/MAKEUP presets; expose only the mix to the user.
+
+**Tech notes for the new pieces (when we build them):**
+- YouTube audio in Electron: easiest is `ytdl-core` or shelling to `yt-dlp` from main process, downloading to a temp file, then loading into AudioContext via `decodeAudioData`. Avoids iframe-capture sketchiness; works because Electron has filesystem + child_process.
+- BPM detection: Essentia.js (heavy WASM but accurate) or a lighter onset-energy approach. Start simple, upgrade if needed.
+- Waveform: keep current `WaveformDisplay` and add a chop-marker overlay; or swap in Peaks.js when going to webapp.
+- Pad grid: new component, 4×4 grid; clicking a pad while a chop region is highlighted on the waveform assigns the chop to that pad.
+
+---
+
 ## Architecture
 
 - `src/renderer/audio/AudioEngine.ts` — Central engine: manages tracks, BPM, bars, swing, quantize, undo/redo, MIDI routing, master volume/limiter, pre-count logic. Delegates to `LoopRecorder`, `Quantizer`, `StemExporter`
@@ -24,7 +58,9 @@ Electron + React + Web Audio API audio looper/sampler. Cross-platform; current w
 - `src/renderer/audio/LoopRecorder.ts` — `MediaRecorder`-based loop capture (webm/opus); returns decoded `AudioBuffer` on stop
 - `src/renderer/audio/TimeStretcher.ts` — `stretchBuffer(ctx, buf, tempo, pitchSemitones)`: offline pitch-preserving time-stretch + time-preserving pitch-shift via soundtouchjs (SoundTouch + SimpleFilter + WebAudioBufferSource). Returns a new AudioBuffer; no-op if tempo≈1 && pitch≈0. Yields to event loop every 8 chunks so long samples don't block UI.
 - `src/renderer/audio/Quantizer.ts` — `GridDiv` type (straight + triplet divisions) and BPM/swing-aware grid-snap helper
-- `src/renderer/audio/StemExporter.ts` — WAV encoder (8/16/24/32-bit) + `exportStem` / `exportMaster`; supports dry (pre-FX) or wet (post-FX) export
+- `src/renderer/audio/StemExporter.ts` — WAV encoder (8/16/24/32-bit) + `exportStem` / `exportMaster`. Wet export delegates to `Track.renderOffline(loopDuration, bpm)` which builds a fresh effects chain in an `OfflineAudioContext`, mirrors all knobs from live state, and renders. Dry export = raw buffer. Master export renders each non-muted/soloed track and sums the resulting buffers.
+- `src/main/mpcDetector.ts` — Cross-platform removable-drive enumeration (Windows: `Get-Volume`; macOS: `/Volumes`; Linux: `lsblk`). Recognizes Akai MPC cards by folder name (`/^MPC[-_ ]?/i`) or signature dirs (`Expansions`, `Projects`, `Samples`). Resolves preferred export dir to `<card>/<MPC folder>/Samples/User/TERMINATOR` (so exports show up in the MPC's user-samples browser). Also exports `ejectDriveForExportDir`: pre-closes Explorer windows pointed at the drive, runs Shell.Application Eject, falls back to `mountvol /D`, verifies via `fs.access` polling.
+- `scripts/run-electron.js` — Tiny Node wrapper for `start`/`dev`. `delete process.env.ELECTRON_RUN_AS_NODE` before spawning Electron, otherwise that env var (commonly set in dev shells) makes `require('electron')` return the binary path string instead of the API and crashes any real Electron app.
 - `src/renderer/audio/MidiInput.ts` — Web MIDI API wrapper, hotplug via `onstatechange`, note-on/off routing
 - `src/renderer/audio/Metronome.ts` — BPM-accurate click scheduler; has `countIn(bpm, beats)` for pre-count
 - `src/renderer/audio/effects/` — Individual effect modules (see list below)
@@ -75,6 +111,10 @@ All effects start **bypassed**. Each uses external `dryGain`/`wetGain` GainNodes
 - **Pitch-preserved time-stretch**: `timeStretch` and `pitch` are now **independent**. `Track` keeps a `processedBuffer` (+ `processedReversedBuffer`) generated asynchronously via `stretchBuffer`. Playback uses the processed buffer at `playbackRate=1`/`detune=0` so stretch/pitch are baked in. On change to buffer/stretch/pitch/reverse: processed buffers are invalidated and regeneration is debounced 150ms; a version counter discards superseded results. While regeneration is pending, playback falls back to the raw buffer with the original varispeed path so audio never drops. `loopStartOffset` is stored in raw-buffer seconds and scaled by `1/timeStretch` when addressing the processed buffer.
 - **Double-click reset**: All knobs/faders/inputs have `onDoubleClick` returning to default value.
 - **4-click pre-count**: `startRecording()` when stopped: plays 4 BPM-synced clicks via `metronome.countIn()`, awaits `4 * beatDuration * 1000 + 50` ms, checks `countInAborted` flag (set by `stop()`), then starts recording. Transport shows "◎ COUNT" and disables REC button during count-in.
+- **Effects accept `BaseAudioContext`, not `AudioContext`**: All effect classes' constructors take `BaseAudioContext` so they can be reconstructed inside an `OfflineAudioContext` for wet stem rendering. Audio-node factories and `audioWorklet` are on `BaseAudioContext`, so this works for both real-time and offline.
+- **Vite `publicDir` gotcha**: `vite.config.ts` sets `root: 'src/renderer'`, so Vite's default `publicDir` would resolve to `src/renderer/public/` — but our worklets live at the repo-root `public/`. Without an explicit `publicDir: path.resolve(__dirname, 'public')` setting, every `audioWorklet.addModule('./worklets/...')` 404s and the effect silently falls back to passthrough. Don't move the worklets without updating this.
+- **MPC detection runs in main process**: 2-second poll via `findMpcExportDir`. Status broadcast over IPC `mpc:status` (full export-dir path, or null). Renderer subscribes via preload's `onMpcStatus`. Polling pauses while an eject is in flight (`ejectInProgress` flag) so our own `fs.readdir`/`fs.stat` doesn't keep a handle on the drive root and prevent dismount.
+- **Eject pre-close step**: Before dismount, we enumerate `Shell.Application.Windows()` and `.Quit()` any whose `LocationURL` starts with `file:///<letter>:`. That clears the most common reason eject fails on Windows (Explorer holding the drive). Other apps with file handles are still on the user; we surface the OS error.
 
 ---
 
@@ -84,7 +124,7 @@ All effects start **bypassed**. Each uses external `dryGain`/`wetGain` GainNodes
 
 ## TrackState Fields
 
-`id, name, volume, pan, muted, soloed, armed, midiArmed, rootNote, reversed, timeStretch, pitch, loopStartOffset, quantizeEnabled, quantizeGrid, swingAmount, effects: { filter, eq, clipper, waveshaper, saturator, ott, widener, mseq, bitcrusher, autopan, trancegate, chorus, delay, reverb, masterBypass, effectsOrder }, hasAudio, bufferDuration, waveformPeaks, color`
+`id, name, volume, pan, muted, soloed, armed, midiArmed, rootNote, reversed, timeStretch, pitch, loopStartOffset, quantizeEnabled, quantizeGrid, swingAmount, effects: { filter, eq, clipper, waveshaper, saturator, compressor, widener, mseq, bitcrusher, autopan, trancegate, chorus, delay, reverb, masterBypass, effectsOrder }, hasAudio, bufferDuration, waveformPeaks, color`
 
 ---
 
@@ -110,8 +150,10 @@ All effects start **bypassed**. Each uses external `dryGain`/`wetGain` GainNodes
 - BPM sync (trance gate), swing, quantize grid
 - MIDI chromatic playback (note-on/off, polyphonic, hotplug)
 - Undo/redo
-- Stem export (WAV, 16/24/32-bit, dry or wet)
+- Stem export (WAV, 16/24/32-bit, dry or wet — wet renders through full FX chain offline)
 - Master limiter
 - Waveform + spectrum analyzer display
 - Metronome
 - Keyboard shortcuts (Space = play/stop, Cmd+Z/Shift+Z = undo/redo)
+- Pitch-preserved time stretch (independent stretch + pitch knobs, soundtouchjs-backed)
+- Auto-detect Akai MPC SD cards in card-access mode → one-click export to `<card>/<MPC folder>/Samples/User/TERMINATOR/`, plus safe-eject button (auto-closes Explorer windows on the card before dismount)
