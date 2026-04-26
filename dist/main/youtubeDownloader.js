@@ -18,6 +18,13 @@ async function findYtDlp() {
     const candidates = [
         'yt-dlp',
         'yt-dlp.exe',
+        path_1.default.join(home, 'Library', 'Python', '3.13', 'bin', 'yt-dlp'),
+        path_1.default.join(home, 'Library', 'Python', '3.12', 'bin', 'yt-dlp'),
+        path_1.default.join(home, 'Library', 'Python', '3.11', 'bin', 'yt-dlp'),
+        path_1.default.join(home, 'Library', 'Python', '3.10', 'bin', 'yt-dlp'),
+        path_1.default.join(home, 'Library', 'Python', '3.9', 'bin', 'yt-dlp'),
+        '/usr/local/bin/yt-dlp',
+        '/opt/homebrew/bin/yt-dlp',
         path_1.default.join(home, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
         path_1.default.join(home, 'scoop', 'shims', 'yt-dlp.exe'),
         'C:\\ProgramData\\chocolatey\\bin\\yt-dlp.exe',
@@ -67,7 +74,8 @@ async function downloadYouTubeAudio(idOrUrl) {
     const metaFile = path_1.default.join(tmpDir, 'meta.txt');
     const args = [
         url,
-        '-f', 'bestaudio',
+        '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+        '--extractor-args', 'youtube:player_client=android,web',
         '--no-playlist',
         '--no-progress',
         '-o', outTemplate,
@@ -91,7 +99,7 @@ async function downloadYouTubeAudio(idOrUrl) {
     const durationSec = Number(durationStr) || 0;
     // Find the produced audio file (could be .m4a, .webm, .opus, .mp3)
     const files = await fs_1.promises.readdir(tmpDir);
-    const audioExt = /\.(m4a|webm|opus|mp3|aac|ogg|wav)$/i;
+    const audioExt = /\.(m4a|webm|opus|mp3|aac|ogg|wav|mp4)$/i;
     const audioFile = files.find(f => audioExt.test(f) && !f.startsWith('meta'));
     if (!audioFile)
         throw new Error('yt-dlp finished but no audio file produced.');

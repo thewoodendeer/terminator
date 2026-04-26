@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { ChopperState, Pad } from './ChopperEngine';
 
 interface Props {
@@ -8,10 +8,9 @@ interface Props {
   onSelect: (padIdx: number) => void;
   onToggleMode: (padIdx: number) => void;
   onClear: (padIdx: number) => void;
+  onPitch: (padIdx: number, semitones: number) => void;
 }
 
-// Keyboard layout — top row of grid maps to top row of keys.
-// Grid (visual top→bottom): row 0 = pads 0..3, row 1 = 4..7, row 2 = 8..11, row 3 = 12..15
 const KEY_TO_PAD: Record<string, number> = {
   '1': 0, '2': 1, '3': 2, '4': 3,
   'q': 4, 'w': 5, 'e': 6, 'r': 7,
@@ -20,9 +19,7 @@ const KEY_TO_PAD: Record<string, number> = {
 };
 const KEY_LABELS = ['1', '2', '3', '4', 'Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F', 'Z', 'X', 'C', 'V'];
 
-export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, onClear }: Props) {
-  // Keyboard handler — register at window level so pads trigger no matter what's focused
-  // (except when typing into a text input).
+export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, onClear, onPitch }: Props) {
   useEffect(() => {
     const isTyping = (e: KeyboardEvent) => {
       const t = e.target;
@@ -34,7 +31,7 @@ export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, o
       const key = e.key.toLowerCase();
       const pad = KEY_TO_PAD[key];
       if (pad === undefined) return;
-      if (heldKeys.has(key)) return; // ignore key repeat
+      if (heldKeys.has(key)) return;
       heldKeys.add(key);
       e.preventDefault();
       onTrigger(pad, 1);
@@ -54,6 +51,8 @@ export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, o
     };
   }, [onTrigger, onRelease]);
 
+  const activePads = new Set(state.activePads);
+
   return (
     <div className="pad-grid">
       {state.pads.map((p, idx) => (
@@ -63,42 +62,79 @@ export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, o
           keyLabel={KEY_LABELS[idx]}
           selected={state.selectedPad === p.index}
           assigned={p.chopId !== null}
+          active={activePads.has(p.index)}
           onTrigger={() => onTrigger(p.index, 1)}
           onRelease={() => onRelease(p.index)}
           onSelect={() => onSelect(p.index)}
           onToggleMode={() => onToggleMode(p.index)}
           onClear={() => onClear(p.index)}
+          onPitch={(s) => onPitch(p.index, s)}
         />
       ))}
     </div>
   );
 }
 
-function PadButton({ pad, keyLabel, selected, assigned, onTrigger, onRelease, onSelect, onToggleMode, onClear }: {
+function PadButton({ pad, keyLabel, selected, assigned, active, onTrigger, onRelease, onSelect, onToggleMode, onClear, onPitch }: {
   pad: Pad;
   keyLabel: string;
   selected: boolean;
   assigned: boolean;
+  active: boolean;
   onTrigger: () => void;
   onRelease: () => void;
   onSelect: () => void;
   onToggleMode: () => void;
   onClear: () => void;
+  onPitch: (semitones: number) => void;
 }) {
+  const pitchRef = useRef<HTMLDivElement>(null);
+
+  // Scroll wheel on pitch display adjusts semitones
+  useEffect(() => {
+    const el = pitchRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY > 0 ? -1 : 1;
+      onPitch(Math.max(-24, Math.min(24, pad.pitch + delta)));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [pad.pitch, onPitch]);
+
   return (
     <div
-      className={`pad ${selected ? 'pad-selected' : ''} ${assigned ? 'pad-assigned' : ''} pad-mode-${pad.mode}`}
+      className={[
+        'pad',
+        selected ? 'pad-selected' : '',
+        assigned ? 'pad-assigned' : '',
+        active ? 'pad-active' : '',
+        `pad-mode-${pad.mode}`,
+      ].filter(Boolean).join(' ')}
       style={{ '--pad-color': pad.color } as React.CSSProperties}
       onMouseDown={e => { e.preventDefault(); onTrigger(); }}
       onMouseUp={onRelease}
       onMouseLeave={onRelease}
       onContextMenu={e => { e.preventDefault(); onSelect(); }}
-      title={`Click: trigger | Right-click: select for assign | Pad ${pad.index + 1}`}
     >
       <div className="pad-key">{keyLabel}</div>
       <div className="pad-num">{String(pad.index + 1).padStart(2, '0')}</div>
-      <div className="pad-mode" onClick={e => { e.stopPropagation(); onToggleMode(); }} title="Toggle one-shot / loop">
+      <div
+        className="pad-mode"
+        onClick={e => { e.stopPropagation(); onToggleMode(); }}
+        title="Toggle one-shot / loop"
+      >
         {pad.mode === 'loop' ? '∞' : '▶'}
+      </div>
+      <div
+        ref={pitchRef}
+        className={`pad-pitch ${pad.pitch !== 0 ? 'pad-pitch-active' : ''}`}
+        onDoubleClick={e => { e.stopPropagation(); onPitch(0); }}
+        title="Scroll to adjust pitch (semitones) • Double-click to reset"
+      >
+        {pad.pitch !== 0 ? (pad.pitch > 0 ? `+${pad.pitch}` : `${pad.pitch}`) : '♩'}
       </div>
       {assigned && (
         <button

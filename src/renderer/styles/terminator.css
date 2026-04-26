@@ -979,6 +979,16 @@ html, body, #root {
 }
 .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.btn-stop {
+  border-color: #ff3355;
+  color: #ff3355;
+  text-shadow: 0 0 6px #ff3355;
+}
+.btn-stop:hover:not(:disabled) {
+  background: rgba(255, 51, 85, 0.15);
+  box-shadow: 0 0 10px rgba(255, 51, 85, 0.4);
+}
+
 .chopper-error {
   background: rgba(255, 0, 60, 0.1);
   border: 1px solid var(--danger);
@@ -1120,6 +1130,128 @@ html, body, #root {
   padding: 2px 4px;
 }
 .pad-clear:hover { color: var(--danger); }
+
+/* Pad active (triggered) */
+.pad.pad-active {
+  background: color-mix(in srgb, var(--pad-color) 35%, var(--bg2));
+  border-color: var(--pad-color);
+  box-shadow: 0 0 20px var(--pad-color), inset 0 0 20px color-mix(in srgb, var(--pad-color) 30%, transparent);
+  transform: scale(0.97);
+}
+.pad.pad-active .pad-key {
+  color: #fff;
+  text-shadow: 0 0 12px var(--pad-color);
+}
+
+/* Pitch knob */
+.pad-pitch {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  font-size: 9px;
+  color: var(--text-dim);
+  cursor: ns-resize;
+  padding: 2px 3px;
+  line-height: 1;
+  border-radius: 2px;
+  user-select: none;
+}
+.pad-pitch.pad-pitch-active {
+  color: var(--neon2);
+  text-shadow: 0 0 4px var(--neon2);
+}
+.pad-pitch:hover { background: rgba(255,255,255,0.05); }
+
+/* Waveform zoom bar */
+.waveform-wrap { display: flex; flex-direction: column; width: 100%; }
+.waveform-zoom-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border-neon);
+}
+.btn-zoom {
+  background: transparent;
+  border: 1px solid var(--border-neon);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+.btn-zoom:hover { color: var(--neon); border-color: var(--neon); }
+.zoom-level { font-size: 10px; color: var(--text-dim); margin-left: 4px; letter-spacing: 1px; }
+
+/* Metronome controls */
+.metro-group { gap: 6px; }
+.btn-metro {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  background: transparent;
+  border: 1px solid var(--border-neon);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.btn-metro.metro-on {
+  color: var(--neon2);
+  border-color: var(--neon2);
+  text-shadow: 0 0 6px var(--neon2);
+  box-shadow: 0 0 8px rgba(0,200,255,0.2);
+}
+.bpm-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--bg3);
+  border: 1px solid var(--border-neon);
+  padding: 2px 8px;
+  cursor: ns-resize;
+  min-width: 52px;
+}
+.bpm-display:hover { border-color: var(--neon); }
+.bpm-label { font-size: 8px; color: var(--text-dim); letter-spacing: 2px; }
+.bpm-value { font-size: 14px; color: var(--neon); font-family: var(--font-hud); letter-spacing: 1px; }
+.bpm-input { width: 60px; text-align: center; font-size: 14px; }
+.metro-sound-select { font-size: 10px; padding: 3px 5px; }
+
+/* Chop mode button */
+.btn-chop-mode {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  background: transparent;
+  border: 1px solid var(--border-neon);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.btn-chop-mode.chop-mode-on {
+  color: #ffcc00;
+  border-color: #ffcc00;
+  text-shadow: 0 0 6px #ffcc00;
+  box-shadow: 0 0 8px rgba(255,204,0,0.2);
+}
+
+/* Chop hint overlay */
+.chopper-chop-hint {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,204,0,0.15);
+  border: 1px solid #ffcc00;
+  color: #ffcc00;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  padding: 4px 12px;
+  pointer-events: none;
+}
 
 /* ── Master FX panel ─────────────────────────────────────────────────────── */
 .master-fx {

@@ -16,6 +16,7 @@ export default function App() {
   const [mode, setMode] = useState<AppMode>('chopper');
   return (
     <>
+      <div className="scanlines" aria-hidden />
       <div className="app-mode-bar">
         <span className="brand">T-800</span>
         <div className="mode-tabs">

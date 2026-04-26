@@ -45,6 +45,12 @@ function toEntry(obj: any): PlaylistEntry | null {
   return { id, title, duration };
 }
 
+function extractPlaylistName(obj: any, fallback: string): string {
+  if (!obj || typeof obj !== 'object') return fallback;
+  const t = obj.playlist_title ?? obj.playlist;
+  return typeof t === 'string' && t.trim() ? t.trim() : fallback;
+}
+
 /** Read all playlist*.json files from the data directory next to the app. */
 export async function loadPlaylists(dataDir: string): Promise<Playlist[]> {
   let files: string[] = [];
@@ -57,10 +63,21 @@ export async function loadPlaylists(dataDir: string): Promise<Playlist[]> {
     const full = path.join(dataDir, f);
     try {
       const raw = await fsp.readFile(full, 'utf8');
+      const trimmed = raw.trim();
       const entries = parsePlaylistJson(raw);
-      if (entries.length > 0) {
-        playlists.push({ name: f.replace(/\.json$/i, ''), entries });
+      if (entries.length === 0) continue;
+      // Extract playlist name from first raw entry
+      let firstObj: any = null;
+      try {
+        const arr = JSON.parse(trimmed);
+        firstObj = Array.isArray(arr) ? arr[0] : arr;
+      } catch {
+        const firstLine = trimmed.split(/\r?\n/).find((l: string) => l.trim());
+        if (firstLine) try { firstObj = JSON.parse(firstLine); } catch { /* */ }
       }
+      const stem = f.replace(/\.json$/i, '');
+      const name = extractPlaylistName(firstObj, stem);
+      playlists.push({ name, entries });
     } catch { /* skip unreadable */ }
   }
   return playlists.sort((a, b) => a.name.localeCompare(b.name));
