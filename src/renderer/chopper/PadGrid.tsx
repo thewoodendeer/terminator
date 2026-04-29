@@ -11,13 +11,10 @@ interface Props {
   onPitch: (padIdx: number, semitones: number) => void;
 }
 
-const KEY_TO_PAD: Record<string, number> = {
-  '1': 0, '2': 1, '3': 2, '4': 3,
-  'q': 4, 'w': 5, 'e': 6, 'r': 7,
-  'a': 8, 's': 9, 'd': 10, 'f': 11,
-  'z': 12, 'x': 13, 'c': 14, 'v': 15,
-};
-const KEY_LABELS = ['1', '2', '3', '4', 'Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F', 'Z', 'X', 'C', 'V'];
+const KEY_SEQUENCE = '1234567890qwertyuiopasdfghjklzxcvbnm';
+const KEY_TO_PAD: Record<string, number> = {};
+for (let i = 0; i < KEY_SEQUENCE.length; i++) KEY_TO_PAD[KEY_SEQUENCE[i]] = i;
+const KEY_LABELS = KEY_SEQUENCE.toUpperCase().split('');
 
 export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, onClear, onPitch }: Props) {
   useEffect(() => {
@@ -51,18 +48,25 @@ export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, o
     };
   }, [onTrigger, onRelease]);
 
-  const activePads = new Set(state.activePads);
+  const activePadSet = new Set(state.activePads);
+  const visiblePads = state.pads.filter(p => p.chopId !== null);
+  const n = Math.max(1, visiblePads.length);
+  const cols = Math.ceil(Math.sqrt(n));
 
   return (
-    <div className="pad-grid">
-      {state.pads.map((p, idx) => (
+    <div
+      className="pad-grid"
+      style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
+      data-cols={cols}
+    >
+      {visiblePads.map(p => (
         <PadButton
           key={p.index}
           pad={p}
-          keyLabel={KEY_LABELS[idx]}
+          keyLabel={KEY_LABELS[p.index] ?? '?'}
           selected={state.selectedPad === p.index}
           assigned={p.chopId !== null}
-          active={activePads.has(p.index)}
+          active={activePadSet.has(p.index)}
           onTrigger={() => onTrigger(p.index, 1)}
           onRelease={() => onRelease(p.index)}
           onSelect={() => onSelect(p.index)}
@@ -89,20 +93,37 @@ function PadButton({ pad, keyLabel, selected, assigned, active, onTrigger, onRel
   onPitch: (semitones: number) => void;
 }) {
   const pitchRef = useRef<HTMLDivElement>(null);
+  const pitchValueRef = useRef(pad.pitch);
+  pitchValueRef.current = pad.pitch;
 
-  // Scroll wheel on pitch display adjusts semitones
   useEffect(() => {
     const el = pitchRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const delta = e.deltaY > 0 ? -1 : 1;
-      onPitch(Math.max(-24, Math.min(24, pad.pitch + delta)));
+      onPitch(Math.max(-24, Math.min(24, pitchValueRef.current + (e.deltaY > 0 ? -1 : 1))));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [pad.pitch, onPitch]);
+  }, []);
+
+  const handlePitchMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startPitch = pitchValueRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const dy = startY - ev.clientY;
+      onPitch(Math.max(-24, Math.min(24, startPitch + Math.round(dy / 4))));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   return (
     <div
@@ -131,8 +152,9 @@ function PadButton({ pad, keyLabel, selected, assigned, active, onTrigger, onRel
       <div
         ref={pitchRef}
         className={`pad-pitch ${pad.pitch !== 0 ? 'pad-pitch-active' : ''}`}
+        onMouseDown={handlePitchMouseDown}
         onDoubleClick={e => { e.stopPropagation(); onPitch(0); }}
-        title="Scroll to adjust pitch (semitones) • Double-click to reset"
+        title="Drag up/down or scroll to adjust pitch • Double-click to reset"
       >
         {pad.pitch !== 0 ? (pad.pitch > 0 ? `+${pad.pitch}` : `${pad.pitch}`) : '♩'}
       </div>

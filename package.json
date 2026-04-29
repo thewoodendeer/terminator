@@ -4,8 +4,7 @@
   "description": "T-800 Audio System — retro MPC looper",
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,red \"vite\" \"wait-on http://localhost:5173 && node scripts/run-electron.js dist/main/main.js\"",
-    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev": "tsc -p tsconfig.main.json && concurrently -k -n VITE,TSC,ELECTRON -c cyan,yellow,red \"vite\" \"tsc -p tsconfig.main.json --watch --preserveWatchOutput\" \"wait-on http://localhost:5173 && nodemon --watch dist/main --watch dist/preload --delay 500ms --exec 'node scripts/run-electron.js dist/main/main.js'\"",
     "build": "vite build && tsc -p tsconfig.main.json",
     "start": "node scripts/run-electron.js dist/main/main.js",
     "pack": "npm run build && electron-builder"
@@ -32,6 +31,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "electron-builder": "^26.8.1",
+    "nodemon": "^3.1.14",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
     "wait-on": "^9.0.5"

@@ -8,12 +8,16 @@ import { estimateBPM } from './bpmDetect';
 
 const ipc = (window as any).terminator as {
   listPlaylists: () => Promise<Array<{ name: string; entries: Array<{ id: string; title: string; duration?: number }> }>>;
-  downloadYouTube: (idOrUrl: string) => Promise<{ ok: boolean; audio?: ArrayBuffer; title?: string; durationSec?: number; videoId?: string; error?: string }>;
+  downloadYouTube: (idOrUrl: string) => Promise<{ ok: boolean; audio?: ArrayBuffer; cacheUrl?: string; title?: string; durationSec?: number; videoId?: string; error?: string }>;
   exportStem: (p: { name: string; data: ArrayBuffer }) => Promise<any>;
   exportAllStems: (stems: Array<{ name: string; data: ArrayBuffer }>) => Promise<any>;
   exportToMpc: (stems: Array<{ name: string; data: ArrayBuffer }>) => Promise<{ savedTo?: string; saved?: string[]; error?: string }>;
   ejectMpc: () => Promise<{ ok?: true; error?: string }>;
   onMpcStatus: (handler: (mountpoint: string | null) => void) => () => void;
+  getCacheStatus: (playlistName: string) => Promise<{ cached: number; total: number; sizeMB: number }>;
+  downloadPlaylist: (playlistName: string) => Promise<{ ok: boolean; done: number; errors: number }>;
+  deletePlaylistCache: (playlistName: string) => Promise<{ deleted: number }>;
+  onCacheProgress: (handler: (p: { playlistName: string; done: number; total: number; currentTitle: string; active: string[] }) => void) => () => void;
 } | undefined;
 
 type Playlist = { name: string; entries: Array<{ id: string; title: string; duration?: number }> };
@@ -32,11 +36,38 @@ export function ChopperView() {
   const engine = engineRef.current!;
 
   const [state, setState] = useState<ChopperState>(() => engine.getState());
+  const [viewStart, setViewStart] = useState(0);
+  const [viewEnd, setViewEnd] = useState(1);
+  const viewRef = useRef({ viewStart: 0, viewEnd: 1 });
+  viewRef.current = { viewStart, viewEnd };
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [mpcExportDir, setMpcExportDir] = useState<string | null>(null);
+  const [cacheStatus, setCacheStatus] = useState<{ cached: number; total: number; sizeMB: number } | null>(null);
+  const [dlProgress, setDlProgress] = useState<{ done: number; total: number; currentTitle: string; active: string[] } | null>(null);
+  const [midiInputs, setMidiInputs] = useState<string[]>([]);
+  const [midiLearn, setMidiLearn] = useState(false);
+  const [midiLearnIdx, setMidiLearnIdx] = useState(0); // next pad to learn
+  const [midiMap, setMidiMap] = useState<Record<number, number>>(() => {
+    // default: notes 36-51 → pads 0-15
+    const m: Record<number, number> = {};
+    for (let i = 0; i < 16; i++) m[36 + i] = i;
+    return m;
+  });
+  const [midiKillNote, setMidiKillNote] = useState<number | null>(null);
+  const [midiLearnKill, setMidiLearnKill] = useState(false);
+  const midiMapRef = useRef<Record<number, number>>({});
+  const midiLearnRef = useRef(false);
+  const midiLearnIdxRef = useRef(0);
+  const midiKillNoteRef = useRef<number | null>(null);
+  const midiLearnKillRef = useRef(false);
+  midiMapRef.current = midiMap;
+  midiLearnRef.current = midiLearn;
+  midiLearnIdxRef.current = midiLearnIdx;
+  midiKillNoteRef.current = midiKillNote;
+  midiLearnKillRef.current = midiLearnKill;
 
   useEffect(() => {
     const unsub = engine.subscribe(setState);
@@ -56,13 +87,129 @@ export function ChopperView() {
     return ipc.onMpcStatus(setMpcExportDir);
   }, []);
 
+  // Refresh cache status whenever the selected playlist changes
+  useEffect(() => {
+    if (!ipc?.getCacheStatus || !selectedPlaylist) return;
+    ipc.getCacheStatus(selectedPlaylist).then(setCacheStatus);
+  }, [selectedPlaylist]);
+
+  // Listen for batch-download progress events
+  useEffect(() => {
+    if (!ipc?.onCacheProgress) return;
+    return ipc.onCacheProgress(p => {
+      if (p.playlistName !== selectedPlaylist) return;
+      setDlProgress({ done: p.done, total: p.total, currentTitle: p.currentTitle, active: p.active });
+      if (p.done >= p.total) {
+        setDlProgress(null);
+        ipc.getCacheStatus!(p.playlistName).then(setCacheStatus);
+      }
+    });
+  }, [selectedPlaylist]);
+
+  const handleDownloadPlaylist = async () => {
+    if (!ipc?.downloadPlaylist || !selectedPlaylist) return;
+    const pl = playlists.find(p => p.name === selectedPlaylist);
+    setDlProgress({ done: 0, total: pl?.entries.length ?? 0, currentTitle: '', active: [] });
+    await ipc.downloadPlaylist(selectedPlaylist);
+    setDlProgress(null);
+    ipc.getCacheStatus!(selectedPlaylist).then(setCacheStatus);
+  };
+
+  const handleDeleteCache = async () => {
+    if (!ipc?.deletePlaylistCache || !selectedPlaylist) return;
+    await ipc.deletePlaylistCache(selectedPlaylist);
+    ipc.getCacheStatus!(selectedPlaylist).then(setCacheStatus);
+    flash('Cache deleted');
+  };
+
   useEffect(() => {
     return () => { engine.dispose(); };
+  }, [engine]);
+
+  // MIDI input — map notes 36-51 (MPC bank A) to pads 1-16
+  useEffect(() => {
+    if (!navigator.requestMIDIAccess) {
+      console.warn('[MIDI] navigator.requestMIDIAccess not available');
+      return;
+    }
+    let access: MIDIAccess;
+
+    const onMessage = (e: MIDIMessageEvent) => {
+      const [status, note, velocity] = e.data as unknown as [number, number, number];
+      const cmd = status & 0xf0;
+      const isNoteOn  = cmd === 0x90 && velocity > 0;
+      const isNoteOff = cmd === 0x80 || (cmd === 0x90 && velocity === 0);
+      if (!isNoteOn && !isNoteOff) return;
+
+      // Kill learn mode: assign incoming note as kill trigger
+      if (isNoteOn && midiLearnKillRef.current) {
+        setMidiKillNote(note);
+        setMidiLearnKill(false);
+        return;
+      }
+
+      // Kill trigger
+      if (isNoteOn && note === midiKillNoteRef.current) {
+        engine.stopAllPads();
+        return;
+      }
+
+      // Pad learn mode: map incoming note → next pad in sequence
+      if (isNoteOn && midiLearnRef.current) {
+        const learnIdx = midiLearnIdxRef.current;
+        if (learnIdx < 16) {
+          setMidiMap(prev => ({ ...prev, [note]: learnIdx }));
+          const next = learnIdx + 1;
+          setMidiLearnIdx(next);
+          if (next >= 16) setMidiLearn(false);
+        }
+        return;
+      }
+
+      const padIdx = midiMapRef.current[note];
+      if (padIdx === undefined) return;
+      if (isNoteOn)  engine.triggerPad(padIdx, velocity / 127);
+      if (isNoteOff) engine.releasePad(padIdx);
+    };
+
+    const refreshInputs = (acc: MIDIAccess) => {
+      const names: string[] = [];
+      acc.inputs.forEach(input => {
+        console.log('[MIDI] input:', input.name, input.state);
+        input.onmidimessage = onMessage;
+        names.push(input.name ?? 'Unknown');
+      });
+      console.log('[MIDI] total inputs:', names.length);
+      setMidiInputs(names);
+    };
+
+    navigator.requestMIDIAccess({ sysex: false }).then(acc => {
+      console.log('[MIDI] access granted, inputs:', acc.inputs.size);
+      access = acc;
+      refreshInputs(acc);
+      acc.onstatechange = (e) => { console.log('[MIDI] state change:', (e as any).port?.name, (e as any).port?.state); refreshInputs(acc); };
+    }).catch(err => { console.error('[MIDI] access denied:', err); });
+
+    return () => {
+      if (access) access.inputs.forEach(i => { i.onmidimessage = null; });
+    };
   }, [engine]);
 
   const flash = (msg: string, ms = 4000) => {
     setStatusMsg(msg);
     setTimeout(() => setStatusMsg(s => (s === msg ? null : s)), ms);
+  };
+
+  // Resolve audio bytes from an IPC response — cache hits come back as a URL
+  // served by the terminator-cache:// protocol (no IPC byte transfer)
+  const resolveAudio = async (res: { audio?: ArrayBuffer; cacheUrl?: string }): Promise<ArrayBuffer> => {
+    if (res.cacheUrl) {
+      const r = await fetch(res.cacheUrl);
+      if (!r.ok) throw new Error(`Cache fetch failed: ${r.status}`);
+      return r.arrayBuffer();
+    }
+    if (res.audio) return res.audio;
+    throw new Error('No audio data in response');
   };
 
   const loadRandomFromPlaylist = async () => {
@@ -75,8 +222,9 @@ export function ChopperView() {
     const pick = pl.entries[Math.floor(Math.random() * pl.entries.length)];
     try {
       const res = await ipc.downloadYouTube(pick.id);
-      if (!res.ok || !res.audio) { setError(res.error ?? 'Download failed'); engine.setLoading(false); return; }
-      await engine.loadFromArrayBuffer(res.audio, res.title ?? pick.title);
+      if (!res.ok) { setError(res.error ?? 'Download failed'); engine.setLoading(false); return; }
+      const audio = await resolveAudio(res);
+      await engine.loadFromArrayBuffer(audio, res.title ?? pick.title);
       if (engine.buffer) {
         const bpm = estimateBPM(engine.buffer);
         if (bpm > 0) engine.setBpm(bpm);
@@ -98,8 +246,9 @@ export function ChopperView() {
     flash('Pulling sample…');
     try {
       const res = await ipc.downloadYouTube(url.trim());
-      if (!res.ok || !res.audio) { setError(res.error ?? 'Download failed'); engine.setLoading(false); return; }
-      await engine.loadFromArrayBuffer(res.audio, res.title ?? 'untitled');
+      if (!res.ok) { setError(res.error ?? 'Download failed'); engine.setLoading(false); return; }
+      const audio = await resolveAudio(res);
+      await engine.loadFromArrayBuffer(audio, res.title ?? 'untitled');
       if (engine.buffer) {
         const bpm = estimateBPM(engine.buffer);
         if (bpm > 0) engine.setBpm(bpm);
@@ -130,16 +279,74 @@ export function ChopperView() {
     }
   };
 
-  // Esc = deselect, Space = stop all
+  // Focused pad: last active or selected
+  const focusedPadIdx = state.activePads.length > 0 ? state.activePads[0]
+    : state.selectedPad !== null ? state.selectedPad : null;
+
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
-      if (e.key === 'Escape') engine.selectPad(null);
-      if (e.key === ' ' && !typing) { e.preventDefault(); engine.stopAllPads(); }
+      if (typing) return;
+
+      if (e.key === 'Escape') { engine.stopAllPads(); engine.selectPad(null); return; }
+
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (state.activePads.length > 0) engine.stopAllPads();
+        else engine.triggerPad(0, 1);
+        return;
+      }
+
+      // , / . → zoom out / in (centered on current view midpoint)
+      if (e.key === ',' || e.key === '.') {
+        e.preventDefault();
+        const { viewStart: vs, viewEnd: ve } = viewRef.current;
+        const mid = (vs + ve) / 2;
+        const span = e.key === '.'
+          ? Math.max(0.005, (ve - vs) * 0.6)
+          : Math.min(1, (ve - vs) * 1.5);
+        const ns = Math.max(0, mid - span / 2);
+        const ne = Math.min(1, ns + span);
+        setViewStart(ns); setViewEnd(ne);
+        return;
+      }
+
+      // Arrow left/right → nudge focused chop start (zoom-aware)
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && focusedPadIdx !== null) {
+        e.preventDefault();
+        const pad = state.pads[focusedPadIdx];
+        if (!pad || pad.chopId === null || !engine.buffer) return;
+        const chop = state.chops.find(c => c.id === pad.chopId);
+        if (!chop) return;
+        const { viewStart: vs, viewEnd: ve } = viewRef.current;
+        const nudge = (ve - vs) * engine.buffer.duration * 0.005;
+        const dir = e.key === 'ArrowLeft' ? -1 : 1;
+        engine.setChopBoundary(pad.chopId, 'start', chop.start + dir * nudge);
+        return;
+      }
+
+      // Arrow up/down → pitch focused pad up/down
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && focusedPadIdx !== null) {
+        e.preventDefault();
+        const pad = state.pads[focusedPadIdx];
+        if (!pad) return;
+        const step = e.shiftKey ? 0.1 : 0.5;
+        const dir = e.key === 'ArrowUp' ? 1 : -1;
+        engine.setPadPitch(focusedPadIdx, pad.pitch + dir * step);
+        return;
+      }
+
+      // / → delete focused pad's chop
+      if (e.key === '/' && focusedPadIdx !== null) {
+        e.preventDefault();
+        engine.clearPad(focusedPadIdx);
+        return;
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [engine]);
+  }, [engine, state.activePads, state.selectedPad, state.pads, state.chops, focusedPadIdx]);
 
   const handleExportMaster = async () => {
     if (!state.hasBuffer) return;
@@ -192,6 +399,29 @@ export function ChopperView() {
             disabled={state.isLoading || !selectedPlaylist}>
             {state.isLoading ? 'PULLING…' : '⤓ GET SAMPLE'}
           </button>
+          <button
+            className={`btn btn-cache-dl ${dlProgress ? 'cache-dl-active' : ''}`}
+            onClick={handleDownloadPlaylist}
+            disabled={!!dlProgress || !selectedPlaylist}
+            title="Download entire playlist to disk for instant loading"
+          >
+            {dlProgress
+              ? `${dlProgress.done}/${dlProgress.total}`
+              : cacheStatus && cacheStatus.cached > 0
+                ? `CACHED ${cacheStatus.cached}/${cacheStatus.total}`
+                : '⬇ DL PLAYLIST'}
+          </button>
+          {cacheStatus && cacheStatus.cached > 0 && !dlProgress && (
+            <button
+              className="btn btn-cache-del"
+              onClick={handleDeleteCache}
+              title="Delete cached audio files for this playlist"
+            >
+              DEL {cacheStatus.sizeMB >= 1000
+                ? `${(cacheStatus.sizeMB / 1024).toFixed(1)}GB`
+                : `${Math.round(cacheStatus.sizeMB)}MB`}
+            </button>
+          )}
         </div>
 
         <div className="toolbar-group">
@@ -223,15 +453,48 @@ export function ChopperView() {
           </select>
         </div>
 
-        {/* Chop mode toggle */}
+        {/* Chop mode toggle + reset */}
         <div className="toolbar-group">
           <button
             className={`btn-chop-mode ${state.chopMode ? 'chop-mode-on' : ''}`}
             onClick={() => engine.toggleChopMode()}
-            title="Chop mode: hit pads while playing to slice at playback position"
+            title="Chop mode: hit empty pads while playing to drop chop points. Filled pads still play normally."
           >
             {state.chopMode ? '✂ CHOP ON' : '✂ CHOP OFF'}
           </button>
+          <button
+            className="btn-reset-chops"
+            onClick={() => engine.autoChop(1)}
+            disabled={!state.hasBuffer}
+            title="Reset — full sample back on pad 1, clear all chop points"
+          >
+            RESET
+          </button>
+        </div>
+
+        <div className="toolbar-group">
+          <div className="midi-status" title={midiInputs.length ? midiInputs.join(', ') : 'No MIDI devices'}>
+            <span className={`midi-dot ${midiInputs.length ? 'midi-dot-on' : ''}`} />
+            {midiInputs.length ? midiInputs[0] : 'NO MIDI'}
+          </div>
+          {midiInputs.length > 0 && (
+            <>
+              <button
+                className={`btn-midi-learn ${midiLearn ? 'midi-learn-on' : ''}`}
+                onClick={() => { setMidiLearn(v => !v); setMidiLearnIdx(0); setMidiLearnKill(false); }}
+                title="MIDI Learn: press to start, then hit each MPC pad in order (1–16)"
+              >
+                {midiLearn ? `LEARN ${midiLearnIdx + 1}/16` : 'LEARN'}
+              </button>
+              <button
+                className={`btn-midi-learn ${midiLearnKill ? 'midi-learn-on' : ''}`}
+                onClick={() => { setMidiLearnKill(v => !v); setMidiLearn(false); }}
+                title={midiKillNote !== null ? `Kill mapped to note ${midiKillNote} — click to remap` : 'Learn a MIDI button to kill all audio'}
+              >
+                {midiLearnKill ? 'HIT KILL BTN' : midiKillNote !== null ? 'KILL ✓' : 'KILL'}
+              </button>
+            </>
+          )}
         </div>
 
         <div className="toolbar-group toolbar-track-info">
@@ -244,6 +507,30 @@ export function ChopperView() {
         </div>
       </div>
 
+      {dlProgress && (
+        <div className="cache-dl-panel">
+          <div className="cache-dl-header">
+            <span className="cache-dl-label">DOWNLOADING — {selectedPlaylist}</span>
+            <span className="cache-dl-count">{dlProgress.done} / {dlProgress.total} &nbsp; {Math.round((dlProgress.done / dlProgress.total) * 100)}%</span>
+          </div>
+          <div className="cache-dl-bar-track">
+            <div className="cache-dl-bar-fill" style={{ width: `${(dlProgress.done / dlProgress.total) * 100}%` }} />
+          </div>
+          {dlProgress.active.length > 0 && (
+            <div className="cache-dl-active-list">
+              {dlProgress.active.map((t, i) => (
+                <span key={i} className="cache-dl-active-item">⬇ {t}</span>
+              ))}
+            </div>
+          )}
+          {dlProgress.active.length === 0 && dlProgress.currentTitle && (
+            <div className="cache-dl-active-list">
+              <span className="cache-dl-active-item cache-dl-done-item">✓ {dlProgress.currentTitle}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {error && <div className="chopper-error">⚠ {error}</div>}
       {statusMsg && <div className="chopper-status">{statusMsg}</div>}
 
@@ -254,6 +541,9 @@ export function ChopperView() {
           buffer={engine.buffer}
           onSeekChop={onSeekChop}
           onAdjustChop={(id, side, t) => engine.setChopBoundary(id, side, t)}
+          viewStart={viewStart}
+          viewEnd={viewEnd}
+          onViewChange={(vs, ve) => { setViewStart(vs); setViewEnd(ve); }}
         />
         {state.selectedPad !== null && (
           <div className="chopper-assign-hint">
@@ -281,6 +571,7 @@ export function ChopperView() {
         <MasterFXPanel
           state={state}
           onMasterVolume={v => engine.setMasterVolume(v)}
+          onMasterPitch={v => engine.setMasterPitch(v)}
           onFilterFreq={v => engine.setFilterFreq(v)}
           onFilterEnabled={b => engine.setFilterEnabled(b)}
           onEQ={(band, v) => engine.setEQ(band, v)}

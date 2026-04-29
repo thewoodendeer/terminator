@@ -17,5 +17,21 @@ contextBridge.exposeInMainWorld('terminator', {
   // ── Chopper feature ───────────────────────────────────────────────────────
   listPlaylists: () => ipcRenderer.invoke('chopper:listPlaylists'),
   downloadYouTube: (idOrUrl: string) =>
-    ipcRenderer.invoke('chopper:downloadYouTube', idOrUrl),
+    ipcRenderer.invoke('chopper:downloadYouTube', idOrUrl) as Promise<{
+      ok: boolean; cacheUrl?: string; audio?: ArrayBuffer;
+      title?: string; durationSec?: number; videoId?: string; error?: string;
+    }>,
+
+  // ── Playlist cache ────────────────────────────────────────────────────────
+  getCacheStatus: (playlistName: string) =>
+    ipcRenderer.invoke('chopper:cacheStatus', playlistName),
+  downloadPlaylist: (playlistName: string) =>
+    ipcRenderer.invoke('chopper:downloadPlaylist', playlistName),
+  deletePlaylistCache: (playlistName: string) =>
+    ipcRenderer.invoke('chopper:deletePlaylistCache', playlistName),
+  onCacheProgress: (handler: (p: { playlistName: string; done: number; total: number; currentTitle: string; active: string[] }) => void): (() => void) => {
+    const listener = (_e: unknown, p: { playlistName: string; done: number; total: number; currentTitle: string; active: string[] }) => handler(p);
+    ipcRenderer.on('cache:progress', listener);
+    return () => ipcRenderer.removeListener('cache:progress', listener);
+  },
 });

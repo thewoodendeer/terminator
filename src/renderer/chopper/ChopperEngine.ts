@@ -29,12 +29,10 @@ export interface TimelineEvent {
   duration: number;
 }
 
-const PAD_COLORS = [
-  '#00ff88', '#00ccff', '#cc00ff', '#ff6600',
-  '#ffcc00', '#ff0066', '#00ff00', '#ff00cc',
-  '#33aaff', '#ff3333', '#88ff33', '#ff99cc',
-  '#33ffcc', '#cc33ff', '#ffaa00', '#aa00ff',
-];
+const PAD_COLORS = Array.from({ length: 36 }, (_, i) => {
+  const hue = Math.round((i * 360) / 36);
+  return `hsl(${hue}, 100%, 60%)`;
+});
 
 const COMP_PRESETS: Record<CompressorStyle, { drive: number; ratio: number; attack: number; release: number; makeup: number; mix: number }> = {
   off:        { drive: 0,  ratio: 1,  attack: 0.01,  release: 0.15, makeup: 0, mix: 0 },
@@ -64,6 +62,7 @@ export interface ChopperState {
   playbackPos: number; // current playback position in buffer seconds (-1 = nothing playing)
   master: {
     volume: number;
+    pitch: number; // semitones, global — shifts all pads (also shifts tempo)
     filterFreq: number;
     filterEnabled: boolean;
     eqLow: number;
@@ -180,7 +179,7 @@ export class ChopperEngine {
     this.masterGain.connect(this.masterLimiter);
     this.masterLimiter.connect(this.ctx.destination);
 
-    this.pads = Array.from({ length: 16 }, (_, i) => ({
+    this.pads = Array.from({ length: 36 }, (_, i) => ({
       index: i,
       chopId: null,
       mode: 'oneshot' as PadMode,
@@ -189,7 +188,7 @@ export class ChopperEngine {
     }));
 
     this.masterState = {
-      volume: 0.85, filterFreq: 20000, filterEnabled: false,
+      volume: 0.85, pitch: 0, filterFreq: 20000, filterEnabled: false,
       eqLow: 0, eqMid: 0, eqHigh: 0,
       compStyle: 'off', compMix: 0,
       delayTime: 0.25, delayFeedback: 0.3, delayMix: 0,
@@ -262,7 +261,6 @@ export class ChopperEngine {
     this.buffer = decoded;
     this.trackTitle = title;
     this.stopAllPads();
-    // Default: 1 chop covering the full sample on pad 1
     this.autoChop(1);
     this.emit();
   }
@@ -271,6 +269,7 @@ export class ChopperEngine {
 
   autoChop(n: number): void {
     if (!this.buffer) return;
+    this.stopAllPads();
     const dur = this.buffer.duration;
     const step = dur / n;
     this.chops = Array.from({ length: n }, (_, i) => ({
@@ -288,11 +287,19 @@ export class ChopperEngine {
     const c = this.chops[idx];
     const v = Math.max(0, Math.min(this.buffer.duration, value));
     if (side === 'start') {
-      const prevEnd = idx > 0 ? this.chops[idx - 1].end : 0;
-      c.start = Math.max(prevEnd, Math.min(v, c.end - 0.01));
+      // Shared boundary with previous chop — move both together
+      const min = idx > 0 ? this.chops[idx - 1].start + 0.01 : 0;
+      const max = c.end - 0.01;
+      const t = Math.max(min, Math.min(max, v));
+      c.start = t;
+      if (idx > 0) this.chops[idx - 1].end = t;
     } else {
-      const nextStart = idx < this.chops.length - 1 ? this.chops[idx + 1].start : this.buffer.duration;
-      c.end = Math.min(nextStart, Math.max(v, c.start + 0.01));
+      // Shared boundary with next chop — move both together
+      const min = c.start + 0.01;
+      const max = idx < this.chops.length - 1 ? this.chops[idx + 1].end - 0.01 : this.buffer.duration;
+      const t = Math.max(min, Math.min(max, v));
+      c.end = t;
+      if (idx < this.chops.length - 1) this.chops[idx + 1].start = t;
     }
     this.emit();
   }
@@ -328,13 +335,9 @@ export class ChopperEngine {
     src.end = pos;
     this.chops.splice(srcIdx + 1, 0, newChop);
 
-    // Assign new chop to target pad
+    // Assign new chop to target pad — keep playing, just mark the point
     const pad = this.pads[targetPadIdx];
     if (pad) pad.chopId = newChop.id;
-
-    // Stop all, start target pad from new chop start
-    this.stopAllPads();
-    this.startVoice(targetPadIdx, 1);
     this.emit();
   }
 
@@ -401,11 +404,16 @@ export class ChopperEngine {
   }
 
   triggerPad(padIdx: number, velocity = 1): void {
-    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().then(() => this._doTrigger(padIdx, velocity)).catch(() => {});
+      return;
+    }
+    this._doTrigger(padIdx, velocity);
+  }
 
-    // Chop-while-playing: if voices are playing and this pad doesn't already have a chop,
-    // or we're in chop mode — slice at current position and assign to this pad.
-    if (this.chopMode && this.voices.size > 0 && padIdx !== [...this.voices.keys()][0]) {
+  private _doTrigger(padIdx: number, velocity: number): void {
+    // Chop-while-playing: only slice if the pad has no chop yet
+    if (this.chopMode && this.voices.size > 0 && this.pads[padIdx]?.chopId === null) {
       this.sliceAtCurrentPosition(padIdx);
       return;
     }
@@ -432,6 +440,7 @@ export class ChopperEngine {
   }
 
   private startVoice(padIdx: number, velocity: number): void {
+    if (this.ctx.state === 'closed') return;
     const pad = this.pads[padIdx];
     if (!pad || pad.chopId === null || !this.buffer) return;
     const chop = this.chops.find(c => c.id === pad.chopId);
@@ -439,7 +448,7 @@ export class ChopperEngine {
 
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
-    src.detune.value = pad.pitch * 100;
+    src.detune.value = (pad.pitch + this.masterState.pitch) * 100;
 
     const gain = this.ctx.createGain();
     gain.gain.value = velocity;
@@ -526,6 +535,10 @@ export class ChopperEngine {
   }
 
   private metronomeSchedulerTick(): void {
+    if (this.ctx.state === 'closed') {
+      if (this.metronomeTimer) clearInterval(this.metronomeTimer);
+      return;
+    }
     const lookahead = 0.1;
     const beatDur = 60 / this.metronomeBpm;
     while (this.nextBeatTime < this.ctx.currentTime + lookahead) {
@@ -536,6 +549,7 @@ export class ChopperEngine {
   }
 
   private scheduleMetronomeClick(time: number, beat: number): void {
+    if (this.ctx.state === 'closed') return;
     const ctx = this.ctx;
     const accent = beat === 0; // downbeat accent
 
@@ -636,6 +650,10 @@ export class ChopperEngine {
     this.masterGain.gain.setTargetAtTime(this.masterState.volume, this.ctx.currentTime, 0.01);
     this.emit();
   }
+  setMasterPitch(semitones: number): void {
+    this.masterState.pitch = Math.max(-24, Math.min(24, semitones));
+    this.emit();
+  }
   setFilterFreq(hz: number): void { this.masterState.filterFreq = hz; this.filter.setFreq(hz); this.emit(); }
   setFilterEnabled(b: boolean): void { this.masterState.filterEnabled = b; this.filter.setBypassed(!b); this.emit(); }
   setEQ(band: 'low' | 'mid' | 'high', gainDB: number): void {
@@ -699,7 +717,7 @@ export class ChopperEngine {
       if (!chop) continue;
       const src = off.createBufferSource();
       src.buffer = this.buffer;
-      src.detune.value = pad.pitch * 100;
+      src.detune.value = (pad.pitch + this.masterState.pitch) * 100;
       const g = off.createGain();
       g.gain.setValueAtTime(0, e.time);
       g.gain.linearRampToValueAtTime(1, e.time + 0.005);
@@ -795,7 +813,7 @@ export class ChopperEngine {
     const { padBus } = this.buildOfflineChain(off);
     const src = off.createBufferSource();
     src.buffer = this.buffer;
-    src.detune.value = pitch * 100;
+    src.detune.value = (pitch + this.masterState.pitch) * 100;
     src.connect(padBus);
     src.start(0, chop.start, dur);
 
@@ -828,6 +846,6 @@ export class ChopperEngine {
   dispose(): void {
     this.stopAllPads();
     if (this.metronomeTimer) clearInterval(this.metronomeTimer);
-    try { this.ctx.close(); } catch { /* */ }
+    this.ctx.close().catch(() => {});
   }
 }

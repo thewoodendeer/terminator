@@ -3,6 +3,7 @@ import { ChopperState, CompressorStyle } from './ChopperEngine';
 interface Props {
   state: ChopperState;
   onMasterVolume: (v: number) => void;
+  onMasterPitch: (semitones: number) => void;
   onFilterFreq: (hz: number) => void;
   onFilterEnabled: (b: boolean) => void;
   onEQ: (band: 'low' | 'mid' | 'high', gainDB: number) => void;
@@ -33,6 +34,10 @@ export function MasterFXPanel(props: Props) {
           min={0} max={100} step={1}
           onChange={v => props.onMasterVolume(v / 100)}
           onReset={() => props.onMasterVolume(0.85)} />
+        <FXKnob label="PITCH/TEMPO" value={m.pitch} unit=" st"
+          min={-24} max={24} step={0.5}
+          onChange={v => props.onMasterPitch(v)}
+          onReset={() => props.onMasterPitch(0)} />
       </div>
 
       <div className="fx-section">

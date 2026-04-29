@@ -1,9 +1,27 @@
-import { app, BrowserWindow, ipcMain, dialog, session } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, protocol, net } from 'electron';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import fs from 'fs';
 import { findMpcExportDir, ejectDriveForExportDir } from './mpcDetector';
 import { downloadYouTubeAudio } from './youtubeDownloader';
 import { loadPlaylists } from './playlists';
+import { getPlaylistCacheStatus, deleteCachedTracks, findCachedEntry, extractVideoId } from './cache';
+
+// Register before app.whenReady — lets the renderer fetch() from this scheme
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'terminator-cache',
+  privileges: { secure: true, standard: false, supportFetchAPI: true },
+}]);
+
+function getCacheDir(): string {
+  return path.join(app.getPath('userData'), 'terminator-audio-cache');
+}
+
+function getDataDir(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'data')
+    : path.join(__dirname, '..', '..', 'data');
+}
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 
@@ -40,6 +58,8 @@ function startMpcPolling(win: BrowserWindow): void {
 app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess,AudioServiceSandbox');
 // Allow AudioContext to resume without waiting for a user gesture
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Enable Web MIDI API (blocked by default in Chromium 94+)
+app.commandLine.appendSwitch('enable-features', 'WebMIDI,WebMIDIGetStatusAPI');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -68,12 +88,21 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Serve cached audio files directly from disk — renderer fetch()es this
+  // scheme instead of receiving the raw bytes over IPC, so no serialization overhead
+  protocol.handle('terminator-cache', (request) => {
+    const url = new URL(request.url);
+    const filename = decodeURIComponent(url.pathname.replace(/^\//, ''));
+    const filePath = path.join(getCacheDir(), filename);
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
+
   // Grant microphone access in renderer
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'media');
+    callback(['media', 'midi', 'midiSysex'].includes(permission));
   });
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
-    return permission === 'media';
+    return ['media', 'midi', 'midiSysex'].includes(permission);
   });
 
   createWindow();
@@ -142,22 +171,85 @@ ipcMain.handle('mpc:eject', async () => {
 });
 
 // IPC: list playlists from /data/playlist*.json
-ipcMain.handle('chopper:listPlaylists', async () => {
-  const dataDir = app.isPackaged
-    ? path.join(process.resourcesPath, 'data')
-    : path.join(__dirname, '..', '..', 'data');
-  return loadPlaylists(dataDir);
-});
+ipcMain.handle('chopper:listPlaylists', async () => loadPlaylists(getDataDir()));
 
-// IPC: download a YouTube video's audio via yt-dlp; returns ArrayBuffer of
-// raw WAV plus title/duration for the renderer to decode.
+// IPC: download a YouTube video's audio — cache hit returns a URL the renderer
+// fetches directly (no IPC byte transfer); miss falls back to yt-dlp
 ipcMain.handle('chopper:downloadYouTube', async (_event, idOrUrl: string) => {
   try {
-    const result = await downloadYouTubeAudio(idOrUrl);
+    const cacheDir = getCacheDir();
+    const videoId = extractVideoId(idOrUrl);
+    const cached = await findCachedEntry(cacheDir, videoId);
+    if (cached) {
+      const filename = encodeURIComponent(path.basename(cached.audioPath));
+      return { ok: true, cacheUrl: `terminator-cache://audio/${filename}`, ...cached.meta };
+    }
+    const result = await downloadYouTubeAudio(idOrUrl, cacheDir);
     return { ok: true, ...result };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? String(e) };
   }
+});
+
+// IPC: how many tracks in this playlist are already cached + total disk size
+ipcMain.handle('chopper:cacheStatus', async (_event, playlistName: string) => {
+  const playlists = await loadPlaylists(getDataDir());
+  const pl = playlists.find(p => p.name === playlistName);
+  if (!pl) return { cached: 0, total: 0, sizeMB: 0 };
+  return getPlaylistCacheStatus(getCacheDir(), pl.entries.map(e => e.id));
+});
+
+// IPC: batch-download all tracks in a playlist to local cache.
+// Sends 'cache:progress' events during download so the UI can show progress.
+ipcMain.handle('chopper:downloadPlaylist', async (event, playlistName: string) => {
+  const playlists = await loadPlaylists(getDataDir());
+  const pl = playlists.find(p => p.name === playlistName);
+  if (!pl) return { ok: false, error: 'Playlist not found' };
+
+  const entries = pl.entries;
+  const total = entries.length;
+  let done = 0;
+  let errors = 0;
+  const cacheDir = getCacheDir();
+  const activeDownloads = new Set<string>(); // titles currently in-flight
+
+  const send = (title: string) => {
+    if (event.sender.isDestroyed()) return;
+    event.sender.send('cache:progress', {
+      playlistName, done, total,
+      currentTitle: title,
+      active: [...activeDownloads],
+    });
+  };
+
+  const queue = [...entries];
+  const worker = async () => {
+    while (queue.length > 0) {
+      const entry = queue.shift()!;
+      const alreadyCached = !!(await findCachedEntry(cacheDir, entry.id));
+      if (!alreadyCached) {
+        activeDownloads.add(entry.title);
+        send(entry.title);
+      }
+      try {
+        await downloadYouTubeAudio(entry.id, cacheDir);
+      } catch { errors++; }
+      activeDownloads.delete(entry.title);
+      done++;
+      send(entry.title);
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker(), worker()]);
+  return { ok: true, done, errors };
+});
+
+// IPC: delete all cached tracks for a playlist
+ipcMain.handle('chopper:deletePlaylistCache', async (_event, playlistName: string) => {
+  const playlists = await loadPlaylists(getDataDir());
+  const pl = playlists.find(p => p.name === playlistName);
+  if (!pl) return { deleted: 0 };
+  const deleted = await deleteCachedTracks(getCacheDir(), pl.entries.map(e => e.id));
+  return { deleted };
 });
 
 // IPC: dump all stems into the detected MPC export directory (typically

@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import { promises as fsp } from 'fs';
 import path from 'path';
 import os from 'os';
+import { extractVideoId, findCachedEntry, saveToCache } from './cache';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,10 +14,14 @@ export interface YouTubeDownloadResult {
   videoId: string;
 }
 
+let cachedYtDlp: string | null | undefined = undefined; // undefined = not yet resolved
+
 /** Locate the yt-dlp binary. We try `yt-dlp` first (PATH lookup) and fall back
  *  to the common Windows install paths. Returns the resolved command string
- *  to pass to spawn, or null if nothing's available. */
+ *  to pass to spawn, or null if nothing's available. Result is cached for the
+ *  lifetime of the process so we don't re-probe on every download. */
 async function findYtDlp(): Promise<string | null> {
+  if (cachedYtDlp !== undefined) return cachedYtDlp;
   const home = os.homedir();
   const candidates: string[] = [
     'yt-dlp',
@@ -35,6 +40,7 @@ async function findYtDlp(): Promise<string | null> {
   for (const c of candidates) {
     try {
       await execFileAsync(c, ['--version']);
+      cachedYtDlp = c;
       return c;
     } catch { /* try next */ }
   }
@@ -48,18 +54,29 @@ async function findYtDlp(): Promise<string | null> {
       const probe = path.join(pkgRoot, e.name, 'yt-dlp.exe');
       try {
         await execFileAsync(probe, ['--version']);
+        cachedYtDlp = probe;
         return probe;
       } catch { /* try next */ }
     }
   } catch { /* WinGet not present */ }
+  cachedYtDlp = null;
   return null;
 }
 
-/** Download the audio for a YouTube video ID (or full URL) as a WAV file in
- *  a temp dir, read it back as an ArrayBuffer, return alongside metadata.
- *  We re-extract title/duration from yt-dlp's --print output instead of
- *  parsing --dump-json, which is faster and less error-prone. */
-export async function downloadYouTubeAudio(idOrUrl: string): Promise<YouTubeDownloadResult> {
+/** Download the audio for a YouTube video ID (or full URL).
+ *  If cacheDir is provided, checks disk cache first (instant return) and
+ *  saves newly-downloaded files to cache for future fast loads. */
+export async function downloadYouTubeAudio(idOrUrl: string, cacheDir?: string): Promise<YouTubeDownloadResult> {
+  // Cache hit — return instantly without hitting YouTube
+  if (cacheDir) {
+    const videoId = extractVideoId(idOrUrl);
+    const cached = await findCachedEntry(cacheDir, videoId);
+    if (cached) {
+      const buf = await fsp.readFile(cached.audioPath);
+      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+      return { audio: ab, ...cached.meta };
+    }
+  }
   const ytdlp = await findYtDlp();
   if (!ytdlp) {
     throw new Error("yt-dlp not found. Install with `winget install yt-dlp` or `choco install yt-dlp`, then restart the app.");
@@ -78,6 +95,7 @@ export async function downloadYouTubeAudio(idOrUrl: string): Promise<YouTubeDown
     url,
     '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
     '--extractor-args', 'youtube:player_client=android,web',
+    '--concurrent-fragments', '4',
     '--no-playlist',
     '--no-progress',
     '-o', outTemplate,
@@ -107,6 +125,11 @@ export async function downloadYouTubeAudio(idOrUrl: string): Promise<YouTubeDown
   if (!audioFile) throw new Error('yt-dlp finished but no audio file produced.');
   const audioPath = path.join(tmpDir, audioFile);
   const buffer = await fsp.readFile(audioPath);
+
+  // Save to cache before cleanup
+  if (cacheDir) {
+    saveToCache(cacheDir, audioPath, { videoId: id, title: title ?? id ?? 'unknown', durationSec }).catch(() => {});
+  }
 
   // Best-effort cleanup
   fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});

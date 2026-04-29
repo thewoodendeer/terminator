@@ -9,11 +9,16 @@ const util_1 = require("util");
 const fs_1 = require("fs");
 const path_1 = __importDefault(require("path"));
 const os_1 = __importDefault(require("os"));
+const cache_1 = require("./cache");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
+let cachedYtDlp = undefined; // undefined = not yet resolved
 /** Locate the yt-dlp binary. We try `yt-dlp` first (PATH lookup) and fall back
  *  to the common Windows install paths. Returns the resolved command string
- *  to pass to spawn, or null if nothing's available. */
+ *  to pass to spawn, or null if nothing's available. Result is cached for the
+ *  lifetime of the process so we don't re-probe on every download. */
 async function findYtDlp() {
+    if (cachedYtDlp !== undefined)
+        return cachedYtDlp;
     const home = os_1.default.homedir();
     const candidates = [
         'yt-dlp',
@@ -32,6 +37,7 @@ async function findYtDlp() {
     for (const c of candidates) {
         try {
             await execFileAsync(c, ['--version']);
+            cachedYtDlp = c;
             return c;
         }
         catch { /* try next */ }
@@ -47,19 +53,30 @@ async function findYtDlp() {
             const probe = path_1.default.join(pkgRoot, e.name, 'yt-dlp.exe');
             try {
                 await execFileAsync(probe, ['--version']);
+                cachedYtDlp = probe;
                 return probe;
             }
             catch { /* try next */ }
         }
     }
     catch { /* WinGet not present */ }
+    cachedYtDlp = null;
     return null;
 }
-/** Download the audio for a YouTube video ID (or full URL) as a WAV file in
- *  a temp dir, read it back as an ArrayBuffer, return alongside metadata.
- *  We re-extract title/duration from yt-dlp's --print output instead of
- *  parsing --dump-json, which is faster and less error-prone. */
-async function downloadYouTubeAudio(idOrUrl) {
+/** Download the audio for a YouTube video ID (or full URL).
+ *  If cacheDir is provided, checks disk cache first (instant return) and
+ *  saves newly-downloaded files to cache for future fast loads. */
+async function downloadYouTubeAudio(idOrUrl, cacheDir) {
+    // Cache hit — return instantly without hitting YouTube
+    if (cacheDir) {
+        const videoId = (0, cache_1.extractVideoId)(idOrUrl);
+        const cached = await (0, cache_1.findCachedEntry)(cacheDir, videoId);
+        if (cached) {
+            const buf = await fs_1.promises.readFile(cached.audioPath);
+            const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+            return { audio: ab, ...cached.meta };
+        }
+    }
     const ytdlp = await findYtDlp();
     if (!ytdlp) {
         throw new Error("yt-dlp not found. Install with `winget install yt-dlp` or `choco install yt-dlp`, then restart the app.");
@@ -76,6 +93,7 @@ async function downloadYouTubeAudio(idOrUrl) {
         url,
         '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
         '--extractor-args', 'youtube:player_client=android,web',
+        '--concurrent-fragments', '4',
         '--no-playlist',
         '--no-progress',
         '-o', outTemplate,
@@ -105,6 +123,10 @@ async function downloadYouTubeAudio(idOrUrl) {
         throw new Error('yt-dlp finished but no audio file produced.');
     const audioPath = path_1.default.join(tmpDir, audioFile);
     const buffer = await fs_1.promises.readFile(audioPath);
+    // Save to cache before cleanup
+    if (cacheDir) {
+        (0, cache_1.saveToCache)(cacheDir, audioPath, { videoId: id, title: title ?? id ?? 'unknown', durationSec }).catch(() => { });
+    }
     // Best-effort cleanup
     fs_1.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => { });
     // Convert Node Buffer to ArrayBuffer that survives the IPC boundary
