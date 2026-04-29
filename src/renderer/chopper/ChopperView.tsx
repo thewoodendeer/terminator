@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChopperEngine, ChopperState, CompressorStyle, MetronomeSound } from './ChopperEngine';
+import { ChopperEngine, ChopperState, ChopPreset, CompressorStyle, MetronomeSound } from './ChopperEngine';
 import { PadGrid } from './PadGrid';
 import { WaveformView } from './WaveformView';
 import { MasterFXPanel } from './MasterFXPanel';
@@ -18,6 +18,8 @@ const ipc = (window as any).terminator as {
   downloadPlaylist: (playlistName: string) => Promise<{ ok: boolean; done: number; errors: number }>;
   deletePlaylistCache: (playlistName: string) => Promise<{ deleted: number }>;
   onCacheProgress: (handler: (p: { playlistName: string; done: number; total: number; currentTitle: string; active: string[] }) => void) => () => void;
+  savePreset: (preset: ChopPreset) => Promise<{ ok: boolean }>;
+  loadPreset: (videoId: string) => Promise<ChopPreset | null>;
 } | undefined;
 
 type Playlist = { name: string; entries: Array<{ id: string; title: string; duration?: number }> };
@@ -56,6 +58,7 @@ export function ChopperView() {
     for (let i = 0; i < 16; i++) m[36 + i] = i;
     return m;
   });
+  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
   const [midiKillNote, setMidiKillNote] = useState<number | null>(null);
   const [midiLearnKill, setMidiLearnKill] = useState(false);
   const midiMapRef = useRef<Record<number, number>>({});
@@ -230,7 +233,15 @@ export function ChopperView() {
         if (bpm > 0) engine.setBpm(bpm);
         engine.setMetronomeBpm(bpm > 0 ? bpm : 120);
       }
-      flash(`Loaded: ${res.title ?? pick.title}`);
+      const vid = res.videoId ?? pick.id;
+      setCurrentVideoId(vid);
+      if (ipc?.loadPreset) {
+        const preset = await ipc.loadPreset(vid);
+        if (preset) { engine.loadPreset(preset); flash(`Loaded: ${res.title ?? pick.title} — preset restored`); }
+        else flash(`Loaded: ${res.title ?? pick.title}`);
+      } else {
+        flash(`Loaded: ${res.title ?? pick.title}`);
+      }
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -254,7 +265,15 @@ export function ChopperView() {
         if (bpm > 0) engine.setBpm(bpm);
         engine.setMetronomeBpm(bpm > 0 ? bpm : 120);
       }
-      flash(`Loaded: ${res.title ?? 'untitled'}`);
+      const vid = res.videoId ?? url.trim();
+      setCurrentVideoId(vid);
+      if (ipc?.loadPreset) {
+        const preset = await ipc.loadPreset(vid);
+        if (preset) { engine.loadPreset(preset); flash(`Loaded: ${res.title ?? 'untitled'} — preset restored`); }
+        else flash(`Loaded: ${res.title ?? 'untitled'}`);
+      } else {
+        flash(`Loaded: ${res.title ?? 'untitled'}`);
+      }
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -469,6 +488,18 @@ export function ChopperView() {
             title="Reset — full sample back on pad 1, clear all chop points"
           >
             RESET
+          </button>
+          <button
+            className="btn-preset-save"
+            disabled={!state.hasBuffer || !currentVideoId}
+            title="Save chop preset for this track"
+            onClick={async () => {
+              if (!ipc?.savePreset || !currentVideoId) return;
+              await ipc.savePreset(engine.getPresetData(currentVideoId));
+              flash('Preset saved');
+            }}
+          >
+            SAVE
           </button>
         </div>
 

@@ -1315,6 +1315,24 @@ html, body, #root {
 }
 .btn-reset-chops:disabled { opacity: 0.3; cursor: default; }
 
+.btn-preset-save {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  background: transparent;
+  border: 1px solid var(--border-neon);
+  color: var(--text-dim);
+  padding: 4px 8px;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.btn-preset-save:hover:not(:disabled) {
+  color: var(--neon-green);
+  border-color: var(--neon-green);
+  text-shadow: 0 0 6px var(--neon-green);
+}
+.btn-preset-save:disabled { opacity: 0.3; cursor: default; }
+
 /* Playlist cache buttons */
 .btn-cache-dl {
   font-family: var(--font-mono);

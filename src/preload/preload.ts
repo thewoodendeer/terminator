@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld('terminator', {
       title?: string; durationSec?: number; videoId?: string; error?: string;
     }>,
 
+  // ── Presets ───────────────────────────────────────────────────────────────
+  savePreset: (preset: object) => ipcRenderer.invoke('chopper:savePreset', preset),
+  loadPreset: (videoId: string) => ipcRenderer.invoke('chopper:loadPreset', videoId) as Promise<object | null>,
+
   // ── Playlist cache ────────────────────────────────────────────────────────
   getCacheStatus: (playlistName: string) =>
     ipcRenderer.invoke('chopper:cacheStatus', playlistName),

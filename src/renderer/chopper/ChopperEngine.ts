@@ -5,6 +5,15 @@ import { Delay } from '../audio/effects/Delay';
 import { Reverb } from '../audio/effects/Reverb';
 import { encodeWAV, WAVBitDepth } from '../audio/StemExporter';
 
+export interface ChopPreset {
+  videoId: string;
+  savedAt: string;
+  chops: Array<{ id: number; start: number; end: number }>;
+  pads: Array<{ index: number; chopId: number | null; mode: string; pitch: number }>;
+  bpm: number;
+  nextChopId: number;
+}
+
 export type PadMode = 'oneshot' | 'loop';
 export type CompressorStyle = 'off' | 'light' | 'punchy' | 'ny' | 'aggressive';
 export type MetronomeSound = 'click' | 'hihat' | 'rimshot' | 'kick' | 'clap';
@@ -281,6 +290,38 @@ export class ChopperEngine {
     this.emit();
   }
 
+  getPresetData(videoId: string): ChopPreset {
+    return {
+      videoId,
+      savedAt: new Date().toISOString(),
+      chops: this.chops.map(c => ({ id: c.id, start: c.start, end: c.end })),
+      pads: this.pads.map(p => ({ index: p.index, chopId: p.chopId, mode: p.mode, pitch: p.pitch })),
+      bpm: this.bpm,
+      nextChopId: this.nextChopId,
+    };
+  }
+
+  loadPreset(preset: ChopPreset): void {
+    if (!this.buffer) return;
+    this.stopAllPads();
+    this.chops = preset.chops.map(c => ({ id: c.id, start: c.start, end: c.end }));
+    this.nextChopId = preset.nextChopId;
+    this.bpm = preset.bpm;
+    this.pads.forEach((p, i) => {
+      const saved = preset.pads[i];
+      if (saved) {
+        p.chopId = saved.chopId;
+        p.mode = saved.mode as PadMode;
+        p.pitch = saved.pitch;
+      } else {
+        p.chopId = null;
+        p.mode = 'oneshot';
+        p.pitch = 0;
+      }
+    });
+    this.emit();
+  }
+
   setChopBoundary(chopId: number, side: 'start' | 'end', value: number): void {
     const idx = this.chops.findIndex(x => x.id === chopId);
     if (idx < 0 || !this.buffer) return;
@@ -412,6 +453,13 @@ export class ChopperEngine {
   }
 
   private _doTrigger(padIdx: number, velocity: number): void {
+    // Empty-chop recovery: no chops + buffer loaded → reset to full sample on pad 0
+    if (this.chops.length === 0 && this.buffer) {
+      this.autoChop(1);
+      this._doTrigger(0, velocity);
+      return;
+    }
+
     // Chop-while-playing: only slice if the pad has no chop yet
     if (this.chopMode && this.voices.size > 0 && this.pads[padIdx]?.chopId === null) {
       this.sliceAtCurrentPosition(padIdx);

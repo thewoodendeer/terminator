@@ -6,6 +6,7 @@ import { findMpcExportDir, ejectDriveForExportDir } from './mpcDetector';
 import { downloadYouTubeAudio } from './youtubeDownloader';
 import { loadPlaylists } from './playlists';
 import { getPlaylistCacheStatus, deleteCachedTracks, findCachedEntry, extractVideoId } from './cache';
+import { savePreset, loadPreset, ChopPreset } from './presets';
 
 // Register before app.whenReady — lets the renderer fetch() from this scheme
 protocol.registerSchemesAsPrivileged([{
@@ -15,6 +16,10 @@ protocol.registerSchemesAsPrivileged([{
 
 function getCacheDir(): string {
   return path.join(app.getPath('userData'), 'terminator-audio-cache');
+}
+
+function getPresetsDir(): string {
+  return path.join(app.getPath('userData'), 'terminator-presets');
 }
 
 function getDataDir(): string {
@@ -241,6 +246,17 @@ ipcMain.handle('chopper:downloadPlaylist', async (event, playlistName: string) =
   };
   await Promise.all([worker(), worker(), worker(), worker(), worker()]);
   return { ok: true, done, errors };
+});
+
+// IPC: save/load chop presets per video ID
+ipcMain.handle('chopper:savePreset', async (_event, preset: ChopPreset) => {
+  await savePreset(getPresetsDir(), preset);
+  return { ok: true };
+});
+
+ipcMain.handle('chopper:loadPreset', async (_event, videoId: string) => {
+  const preset = await loadPreset(getPresetsDir(), videoId);
+  return preset ?? null;
 });
 
 // IPC: delete all cached tracks for a playlist
