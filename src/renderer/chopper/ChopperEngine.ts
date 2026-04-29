@@ -68,6 +68,7 @@ export interface ChopperState {
   selectedPad: number | null;
   activePads: number[];
   chopMode: boolean;
+  transientSnap: boolean;
   playbackPos: number; // current playback position in buffer seconds (-1 = nothing playing)
   master: {
     volume: number;
@@ -122,6 +123,7 @@ export class ChopperEngine {
   private activePadSet = new Set<number>();
   private selectedPad: number | null = null;
   private chopMode = true;
+  private transientSnap = true;
 
   private recording = false;
   private recordStart = 0;
@@ -245,6 +247,7 @@ export class ChopperEngine {
       selectedPad: this.selectedPad,
       activePads: [...this.activePadSet],
       chopMode: this.chopMode,
+      transientSnap: this.transientSnap,
       playbackPos,
       master: { ...this.masterState },
       metronome: {
@@ -367,6 +370,35 @@ export class ChopperEngine {
     this.emit();
   }
 
+  toggleTransientSnap(): void {
+    this.transientSnap = !this.transientSnap;
+    this.emit();
+  }
+
+  private snapToTransient(posSec: number, windowSec = 0.08): number {
+    if (!this.buffer) return posSec;
+    const sr = this.buffer.sampleRate;
+    const ch = this.buffer.getChannelData(0);
+    const frameSize = 256;
+    const startFrame = Math.max(0, Math.floor((posSec - windowSec) * sr / frameSize));
+    const endFrame = Math.min(
+      Math.floor((ch.length - frameSize) / frameSize),
+      Math.ceil((posSec + windowSec) * sr / frameSize)
+    );
+    let bestOnset = -1;
+    let bestSample = Math.floor(posSec * sr);
+    let prevEnergy = 0;
+    for (let f = startFrame; f <= endFrame; f++) {
+      const base = f * frameSize;
+      let energy = 0;
+      for (let j = 0; j < frameSize; j++) energy += ch[base + j] * ch[base + j];
+      const onset = energy - prevEnergy;
+      if (onset > bestOnset) { bestOnset = onset; bestSample = base; }
+      prevEnergy = energy;
+    }
+    return bestSample / sr;
+  }
+
   /** Slice at current playback position and assign new chop to targetPadIdx. */
   private sliceAtCurrentPosition(targetPadIdx: number): void {
     if (!this.buffer || this.voices.size === 0) return;
@@ -378,6 +410,8 @@ export class ChopperEngine {
       break;
     }
     if (pos < 0) return;
+
+    if (this.transientSnap) pos = this.snapToTransient(pos);
 
     // Find which chop contains this position
     const srcIdx = this.chops.findIndex(c => pos >= c.start && pos < c.end);
@@ -722,6 +756,11 @@ export class ChopperEngine {
   }
   setMasterPitch(semitones: number): void {
     this.masterState.pitch = Math.max(-24, Math.min(24, semitones));
+    this.emit();
+  }
+
+  adjustMasterPitch(delta: number): void {
+    this.masterState.pitch = Math.max(-24, Math.min(24, this.masterState.pitch + delta));
     this.emit();
   }
   setFilterFreq(hz: number): void { this.masterState.filterFreq = hz; this.filter.setFreq(hz); this.emit(); }

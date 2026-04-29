@@ -352,12 +352,19 @@ export function ChopperView() {
         return;
       }
 
-      // Arrow up/down → pitch focused pad up/down (uses engine-internal state so key-repeat accumulates correctly)
-      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && focusedPadIdx !== null) {
+      // Arrow up/down → global pitch
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
         const step = e.shiftKey ? 0.1 : 0.5;
-        const dir = e.key === 'ArrowUp' ? 1 : -1;
-        engine.adjustPadPitch(focusedPadIdx, dir * step);
+        engine.adjustMasterPitch(e.key === 'ArrowUp' ? step : -step);
+        return;
+      }
+
+      // [ / ] → per-pad pitch for focused pad
+      if ((e.key === '[' || e.key === ']') && focusedPadIdx !== null) {
+        e.preventDefault();
+        const step = e.shiftKey ? 0.1 : 0.5;
+        engine.adjustPadPitch(focusedPadIdx, e.key === ']' ? step : -step);
         return;
       }
 
@@ -504,6 +511,13 @@ export function ChopperView() {
             title="Chop mode: hit empty pads while playing to drop chop points. Filled pads still play normally."
           >
             {state.chopMode ? '✂ CHOP ON' : '✂ CHOP OFF'}
+          </button>
+          <button
+            className={`btn-chop-mode ${state.transientSnap ? 'chop-mode-on' : ''}`}
+            onClick={() => engine.toggleTransientSnap()}
+            title="Snap chop points to nearest transient (onset) within ±80ms"
+          >
+            {state.transientSnap ? '⊹ SNAP ON' : '⊹ SNAP OFF'}
           </button>
           <button
             className="btn-reset-chops"
