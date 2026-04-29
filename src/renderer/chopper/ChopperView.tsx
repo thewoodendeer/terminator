@@ -305,7 +305,9 @@ export function ChopperView() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      const typing = (e.target instanceof HTMLInputElement && e.target.type !== 'range')
+        || e.target instanceof HTMLTextAreaElement
+        || e.target instanceof HTMLSelectElement;
       if (typing) return;
 
       if (e.key === 'Escape') { engine.stopAllPads(); engine.selectPad(null); return; }
@@ -345,14 +347,12 @@ export function ChopperView() {
         return;
       }
 
-      // Arrow up/down → pitch focused pad up/down
+      // Arrow up/down → pitch focused pad up/down (uses engine-internal state so key-repeat accumulates correctly)
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && focusedPadIdx !== null) {
         e.preventDefault();
-        const pad = state.pads[focusedPadIdx];
-        if (!pad) return;
         const step = e.shiftKey ? 0.1 : 0.5;
         const dir = e.key === 'ArrowUp' ? 1 : -1;
-        engine.setPadPitch(focusedPadIdx, pad.pitch + dir * step);
+        engine.adjustPadPitch(focusedPadIdx, dir * step);
         return;
       }
 

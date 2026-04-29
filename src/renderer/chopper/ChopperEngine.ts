@@ -444,6 +444,13 @@ export class ChopperEngine {
     this.emit();
   }
 
+  adjustPadPitch(padIdx: number, delta: number): void {
+    const pad = this.pads[padIdx];
+    if (!pad) return;
+    pad.pitch = Math.max(-24, Math.min(24, pad.pitch + delta));
+    this.emit();
+  }
+
   triggerPad(padIdx: number, velocity = 1): void {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().then(() => this._doTrigger(padIdx, velocity)).catch(() => {});

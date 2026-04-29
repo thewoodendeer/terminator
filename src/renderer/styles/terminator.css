@@ -1223,6 +1223,25 @@ html, body, #root {
 }
 .pad-pitch:hover { background: rgba(255,255,255,0.05); }
 
+.pad-pitch-bar {
+  position: absolute;
+  left: 0;
+  width: 3px;
+  min-height: 3px;
+  pointer-events: none;
+  border-radius: 0 2px 2px 0;
+}
+.pad-pitch-bar-up {
+  bottom: 50%;
+  background: var(--neon2);
+  box-shadow: 0 0 4px var(--neon2);
+}
+.pad-pitch-bar-down {
+  top: 50%;
+  background: #ff6644;
+  box-shadow: 0 0 4px #ff6644;
+}
+
 /* Waveform zoom bar */
 .waveform-wrap { display: flex; flex-direction: column; width: 100%; }
 .waveform-zoom-bar {

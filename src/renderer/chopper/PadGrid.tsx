@@ -158,6 +158,12 @@ function PadButton({ pad, keyLabel, selected, assigned, active, onTrigger, onRel
       >
         {pad.pitch !== 0 ? (pad.pitch > 0 ? `+${pad.pitch}` : `${pad.pitch}`) : '♩'}
       </div>
+      {pad.pitch !== 0 && (
+        <div
+          className={`pad-pitch-bar ${pad.pitch > 0 ? 'pad-pitch-bar-up' : 'pad-pitch-bar-down'}`}
+          style={{ height: `${Math.min(Math.abs(pad.pitch), 6) / 6 * 48}%` }}
+        />
+      )}
       {assigned && (
         <button
           className="pad-clear"
