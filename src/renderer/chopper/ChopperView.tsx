@@ -305,9 +305,10 @@ export function ChopperView() {
     }
   };
 
-  // Focused pad: last active or selected
+  // Focused pad: playing > explicitly selected > last triggered
   const focusedPadIdx = state.activePads.length > 0 ? state.activePads[0]
-    : state.selectedPad !== null ? state.selectedPad : null;
+    : state.selectedPad !== null ? state.selectedPad
+    : state.lastTriggeredPad;
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -340,13 +341,13 @@ export function ChopperView() {
         return;
       }
 
-      // Arrow left/right → nudge focused chop start (zoom-aware, delta on engine state so key-repeat accumulates)
+      // Arrow left/right → nudge focused chop start (zoom-aware, shift = fine)
       if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && focusedPadIdx !== null) {
         e.preventDefault();
         const pad = state.pads[focusedPadIdx];
         if (!pad || pad.chopId === null || !engine.buffer) return;
         const { viewStart: vs, viewEnd: ve } = viewRef.current;
-        const nudge = (ve - vs) * engine.buffer.duration * 0.005;
+        const nudge = (ve - vs) * engine.buffer.duration * (e.shiftKey ? 0.0005 : 0.005);
         const dir = e.key === 'ArrowLeft' ? -1 : 1;
         engine.adjustChopBoundary(pad.chopId, 'start', dir * nudge);
         return;
@@ -368,8 +369,8 @@ export function ChopperView() {
         return;
       }
 
-      // / → delete focused pad's chop
-      if (e.key === '/' && focusedPadIdx !== null) {
+      // Backspace (Mac "delete" key) → delete focused pad's chop
+      if (e.key === 'Backspace' && focusedPadIdx !== null) {
         e.preventDefault();
         engine.clearPad(focusedPadIdx);
         return;
@@ -526,6 +527,14 @@ export function ChopperView() {
             title="Reset — full sample back on pad 1, clear all chop points"
           >
             RESET
+          </button>
+          <button
+            className="btn-reset-chops"
+            onClick={() => engine.clearAllChops()}
+            disabled={!state.hasBuffer}
+            title="Delete all pads and chops"
+          >
+            DEL ALL
           </button>
           <button
             className="btn-preset-save"

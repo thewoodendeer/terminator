@@ -69,6 +69,7 @@ export interface ChopperState {
   activePads: number[];
   chopMode: boolean;
   transientSnap: boolean;
+  lastTriggeredPad: number | null;
   playbackPos: number; // current playback position in buffer seconds (-1 = nothing playing)
   master: {
     volume: number;
@@ -124,6 +125,7 @@ export class ChopperEngine {
   private selectedPad: number | null = null;
   private chopMode = true;
   private transientSnap = true;
+  private lastTriggeredPad: number | null = null;
 
   private recording = false;
   private recordStart = 0;
@@ -248,6 +250,7 @@ export class ChopperEngine {
       activePads: [...this.activePadSet],
       chopMode: this.chopMode,
       transientSnap: this.transientSnap,
+      lastTriggeredPad: this.lastTriggeredPad,
       playbackPos,
       master: { ...this.masterState },
       metronome: {
@@ -286,6 +289,13 @@ export class ChopperEngine {
   }
 
   // ── Chops ──────────────────────────────────────────────────────────────────
+
+  clearAllChops(): void {
+    this.stopAllPads();
+    this.chops = [];
+    this.pads.forEach(p => { p.chopId = null; });
+    this.emit();
+  }
 
   autoChop(n: number, startOffset = 0): void {
     if (!this.buffer) return;
@@ -545,6 +555,7 @@ export class ChopperEngine {
 
   private startVoice(padIdx: number, velocity: number): void {
     if (this.ctx.state === 'closed') return;
+    this.lastTriggeredPad = padIdx;
     const pad = this.pads[padIdx];
     if (!pad || pad.chopId === null || !this.buffer) return;
     const chop = this.chops.find(c => c.id === pad.chopId);
@@ -557,8 +568,7 @@ export class ChopperEngine {
     const gain = this.ctx.createGain();
     gain.gain.value = velocity;
     const t = this.ctx.currentTime;
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(velocity, t + 0.005);
+    gain.gain.setValueAtTime(velocity, t);
     src.connect(gain);
     gain.connect(this.padBus);
 
@@ -600,8 +610,8 @@ export class ChopperEngine {
     try {
       v.gain.gain.cancelScheduledValues(t);
       v.gain.gain.setValueAtTime(v.gain.gain.value, t);
-      v.gain.gain.linearRampToValueAtTime(0, t + 0.01);
-      v.src.stop(t + 0.012);
+      v.gain.gain.linearRampToValueAtTime(0, t + 0.003);
+      v.src.stop(t + 0.004);
     } catch { /* already stopped */ }
     this.voices.delete(padIdx);
     this.activePadSet.delete(padIdx);

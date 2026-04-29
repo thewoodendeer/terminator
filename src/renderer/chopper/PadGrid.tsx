@@ -25,9 +25,14 @@ export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, o
         || t instanceof HTMLSelectElement;
     };
     const heldKeys = new Set<string>();
+    const codeToKey = (e: KeyboardEvent): string => {
+      if (e.code.startsWith('Digit')) return e.code.slice(5);
+      if (e.code.startsWith('Key')) return e.code.slice(3).toLowerCase();
+      return e.key.toLowerCase();
+    };
     const onDown = (e: KeyboardEvent) => {
       if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const key = e.key.toLowerCase();
+      const key = codeToKey(e);
       const pad = KEY_TO_PAD[key];
       if (pad === undefined) return;
       if (heldKeys.has(key)) return;
@@ -36,7 +41,7 @@ export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, o
       onTrigger(pad, 1);
     };
     const onUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = codeToKey(e);
       const pad = KEY_TO_PAD[key];
       if (pad === undefined) return;
       heldKeys.delete(key);
