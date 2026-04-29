@@ -1380,6 +1380,19 @@ html, body, #root {
 }
 .btn-cache-del:hover { color: #ff4444; border-color: #ff4444; text-shadow: 0 0 6px #ff4444; }
 
+.btn-cache-dir {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--border-neon);
+  color: var(--text-dim);
+  padding: 4px 7px;
+  cursor: pointer;
+  margin-left: 4px;
+  letter-spacing: 1px;
+}
+.btn-cache-dir:hover { color: var(--neon-green); border-color: var(--neon-green); }
+
 /* Download progress panel */
 .cache-dl-panel {
   background: rgba(0,255,136,0.04);

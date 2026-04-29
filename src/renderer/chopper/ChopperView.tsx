@@ -14,12 +14,14 @@ const ipc = (window as any).terminator as {
   exportToMpc: (stems: Array<{ name: string; data: ArrayBuffer }>) => Promise<{ savedTo?: string; saved?: string[]; error?: string }>;
   ejectMpc: () => Promise<{ ok?: true; error?: string }>;
   onMpcStatus: (handler: (mountpoint: string | null) => void) => () => void;
-  getCacheStatus: (playlistName: string) => Promise<{ cached: number; total: number; sizeMB: number }>;
+  getCacheStatus: (playlistName: string) => Promise<{ cached: number; total: number; sizeMB: number; estimatedMB: number }>;
   downloadPlaylist: (playlistName: string) => Promise<{ ok: boolean; done: number; errors: number }>;
   deletePlaylistCache: (playlistName: string) => Promise<{ deleted: number }>;
   onCacheProgress: (handler: (p: { playlistName: string; done: number; total: number; currentTitle: string; active: string[] }) => void) => () => void;
   savePreset: (preset: ChopPreset) => Promise<{ ok: boolean }>;
   loadPreset: (videoId: string) => Promise<ChopPreset | null>;
+  getCacheDir: () => Promise<string>;
+  setCacheDir: () => Promise<{ ok?: boolean; cacheDir?: string; cancelled?: boolean }>;
 } | undefined;
 
 type Playlist = { name: string; entries: Array<{ id: string; title: string; duration?: number }> };
@@ -47,7 +49,8 @@ export function ChopperView() {
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [mpcExportDir, setMpcExportDir] = useState<string | null>(null);
-  const [cacheStatus, setCacheStatus] = useState<{ cached: number; total: number; sizeMB: number } | null>(null);
+  const [cacheStatus, setCacheStatus] = useState<{ cached: number; total: number; sizeMB: number; estimatedMB: number } | null>(null);
+  const [cacheDir, setCacheDirState] = useState<string>('');
   const [dlProgress, setDlProgress] = useState<{ done: number; total: number; currentTitle: string; active: string[] } | null>(null);
   const [midiInputs, setMidiInputs] = useState<string[]>([]);
   const [midiLearn, setMidiLearn] = useState(false);
@@ -83,6 +86,10 @@ export function ChopperView() {
       setPlaylists(pls);
       if (pls.length > 0) setSelectedPlaylist(pls[0].name);
     });
+  }, []);
+
+  useEffect(() => {
+    ipc?.getCacheDir?.().then(setCacheDirState);
   }, []);
 
   useEffect(() => {
@@ -420,13 +427,17 @@ export function ChopperView() {
             className={`btn btn-cache-dl ${dlProgress ? 'cache-dl-active' : ''}`}
             onClick={handleDownloadPlaylist}
             disabled={!!dlProgress || !selectedPlaylist}
-            title="Download entire playlist to disk for instant loading"
+            title={cacheStatus && cacheStatus.estimatedMB > 0
+              ? `~${cacheStatus.estimatedMB >= 1000 ? (cacheStatus.estimatedMB/1024).toFixed(1)+'GB' : Math.round(cacheStatus.estimatedMB)+'MB'} to download`
+              : 'Download entire playlist to disk for instant loading'}
           >
             {dlProgress
               ? `${dlProgress.done}/${dlProgress.total}`
               : cacheStatus && cacheStatus.cached > 0
                 ? `CACHED ${cacheStatus.cached}/${cacheStatus.total}`
-                : '⬇ DL PLAYLIST'}
+                : cacheStatus && cacheStatus.estimatedMB > 0
+                  ? `⬇ DL ~${cacheStatus.estimatedMB >= 1000 ? (cacheStatus.estimatedMB/1024).toFixed(1)+'GB' : Math.round(cacheStatus.estimatedMB)+'MB'}`
+                  : '⬇ DL PLAYLIST'}
           </button>
           {cacheStatus && cacheStatus.cached > 0 && !dlProgress && (
             <button
@@ -439,6 +450,21 @@ export function ChopperView() {
                 : `${Math.round(cacheStatus.sizeMB)}MB`}
             </button>
           )}
+          <button
+            className="btn btn-cache-dir"
+            onClick={async () => {
+              if (!ipc?.setCacheDir) return;
+              const res = await ipc.setCacheDir();
+              if (res.ok && res.cacheDir) {
+                setCacheDirState(res.cacheDir);
+                ipc.getCacheStatus!(selectedPlaylist).then(setCacheStatus);
+                flash(`Cache → ${res.cacheDir}`);
+              }
+            }}
+            title={`Cache folder: ${cacheDir || 'default'}\nClick to change (use external drive)`}
+          >
+            …
+          </button>
         </div>
 
         <div className="toolbar-group">

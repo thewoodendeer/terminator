@@ -14,8 +14,21 @@ protocol.registerSchemesAsPrivileged([{
   privileges: { secure: true, standard: false, supportFetchAPI: true },
 }]);
 
+function getSettingsPath(): string {
+  return path.join(app.getPath('userData'), 'terminator-settings.json');
+}
+
+function readSettings(): Record<string, any> {
+  try { return JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8')); } catch { return {}; }
+}
+
+function writeSettings(data: Record<string, any>): void {
+  fs.writeFileSync(getSettingsPath(), JSON.stringify(data, null, 2));
+}
+
 function getCacheDir(): string {
-  return path.join(app.getPath('userData'), 'terminator-audio-cache');
+  const custom = readSettings().cacheDir;
+  return (typeof custom === 'string' && custom) ? custom : path.join(app.getPath('userData'), 'terminator-audio-cache');
 }
 
 function getPresetsDir(): string {
@@ -196,12 +209,16 @@ ipcMain.handle('chopper:downloadYouTube', async (_event, idOrUrl: string) => {
   }
 });
 
-// IPC: how many tracks in this playlist are already cached + total disk size
+// IPC: how many tracks in this playlist are already cached + total disk size + estimated download size
 ipcMain.handle('chopper:cacheStatus', async (_event, playlistName: string) => {
   const playlists = await loadPlaylists(getDataDir());
   const pl = playlists.find(p => p.name === playlistName);
-  if (!pl) return { cached: 0, total: 0, sizeMB: 0 };
-  return getPlaylistCacheStatus(getCacheDir(), pl.entries.map(e => e.id));
+  if (!pl) return { cached: 0, total: 0, sizeMB: 0, estimatedMB: 0 };
+  const status = await getPlaylistCacheStatus(getCacheDir(), pl.entries.map(e => e.id));
+  // Estimate uncached download size: ~1.5 MB/min at 128kbps
+  const uncachedEntries = pl.entries.slice(status.cached);
+  const estimatedMB = uncachedEntries.reduce((sum, e) => sum + ((e.duration ?? 180) / 60) * 1.5, 0);
+  return { ...status, estimatedMB };
 });
 
 // IPC: batch-download all tracks in a playlist to local cache.
@@ -232,10 +249,9 @@ ipcMain.handle('chopper:downloadPlaylist', async (event, playlistName: string) =
     while (queue.length > 0) {
       const entry = queue.shift()!;
       const alreadyCached = !!(await findCachedEntry(cacheDir, entry.id));
-      if (!alreadyCached) {
-        activeDownloads.add(entry.title);
-        send(entry.title);
-      }
+      if (alreadyCached) { done++; send(entry.title); continue; }
+      activeDownloads.add(entry.title);
+      send(entry.title);
       try {
         await downloadYouTubeAudio(entry.id, cacheDir);
       } catch { errors++; }
@@ -266,6 +282,22 @@ ipcMain.handle('chopper:deletePlaylistCache', async (_event, playlistName: strin
   if (!pl) return { deleted: 0 };
   const deleted = await deleteCachedTracks(getCacheDir(), pl.entries.map(e => e.id));
   return { deleted };
+});
+
+// IPC: get / set the audio cache directory (supports external hard drives)
+ipcMain.handle('chopper:getCacheDir', () => getCacheDir());
+
+ipcMain.handle('chopper:setCacheDir', async () => {
+  const { filePaths } = await dialog.showOpenDialog({
+    title: 'Choose audio cache folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (!filePaths || filePaths.length === 0) return { cancelled: true };
+  const chosen = filePaths[0];
+  const settings = readSettings();
+  settings.cacheDir = chosen;
+  writeSettings(settings);
+  return { ok: true, cacheDir: chosen };
 });
 
 // IPC: dump all stems into the detected MPC export directory (typically

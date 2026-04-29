@@ -270,21 +270,30 @@ export class ChopperEngine {
     this.buffer = decoded;
     this.trackTitle = title;
     this.stopAllPads();
-    this.autoChop(1);
+    this.autoChop(1, this.detectSilenceEnd(decoded));
     this.emit();
+  }
+
+  private detectSilenceEnd(buf: AudioBuffer, threshold = 0.001): number {
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) {
+      if (Math.abs(ch[i]) > threshold) return i / buf.sampleRate;
+    }
+    return 0;
   }
 
   // ── Chops ──────────────────────────────────────────────────────────────────
 
-  autoChop(n: number): void {
+  autoChop(n: number, startOffset = 0): void {
     if (!this.buffer) return;
     this.stopAllPads();
     const dur = this.buffer.duration;
-    const step = dur / n;
+    const usable = dur - startOffset;
+    const step = usable / n;
     this.chops = Array.from({ length: n }, (_, i) => ({
       id: this.nextChopId++,
-      start: i * step,
-      end: (i + 1) * step,
+      start: startOffset + i * step,
+      end: startOffset + (i + 1) * step,
     }));
     this.pads.forEach((p, i) => { p.chopId = i < this.chops.length ? this.chops[i].id : null; });
     this.emit();

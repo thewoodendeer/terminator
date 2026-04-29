@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld('terminator', {
       title?: string; durationSec?: number; videoId?: string; error?: string;
     }>,
 
+  // ── Cache directory ───────────────────────────────────────────────────────
+  getCacheDir: () => ipcRenderer.invoke('chopper:getCacheDir') as Promise<string>,
+  setCacheDir: () => ipcRenderer.invoke('chopper:setCacheDir') as Promise<{ ok?: boolean; cacheDir?: string; cancelled?: boolean }>,
+
   // ── Presets ───────────────────────────────────────────────────────────────
   savePreset: (preset: object) => ipcRenderer.invoke('chopper:savePreset', preset),
   loadPreset: (videoId: string) => ipcRenderer.invoke('chopper:loadPreset', videoId) as Promise<object | null>,
