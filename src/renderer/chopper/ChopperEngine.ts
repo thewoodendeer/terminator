@@ -322,6 +322,12 @@ export class ChopperEngine {
     this.emit();
   }
 
+  adjustChopBoundary(chopId: number, side: 'start' | 'end', delta: number): void {
+    const c = this.chops.find(x => x.id === chopId);
+    if (!c) return;
+    this.setChopBoundary(chopId, side, (side === 'start' ? c.start : c.end) + delta);
+  }
+
   setChopBoundary(chopId: number, side: 'start' | 'end', value: number): void {
     const idx = this.chops.findIndex(x => x.id === chopId);
     if (idx < 0 || !this.buffer) return;

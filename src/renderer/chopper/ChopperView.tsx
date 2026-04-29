@@ -333,17 +333,15 @@ export function ChopperView() {
         return;
       }
 
-      // Arrow left/right → nudge focused chop start (zoom-aware)
+      // Arrow left/right → nudge focused chop start (zoom-aware, delta on engine state so key-repeat accumulates)
       if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && focusedPadIdx !== null) {
         e.preventDefault();
         const pad = state.pads[focusedPadIdx];
         if (!pad || pad.chopId === null || !engine.buffer) return;
-        const chop = state.chops.find(c => c.id === pad.chopId);
-        if (!chop) return;
         const { viewStart: vs, viewEnd: ve } = viewRef.current;
         const nudge = (ve - vs) * engine.buffer.duration * 0.005;
         const dir = e.key === 'ArrowLeft' ? -1 : 1;
-        engine.setChopBoundary(pad.chopId, 'start', chop.start + dir * nudge);
+        engine.adjustChopBoundary(pad.chopId, 'start', dir * nudge);
         return;
       }
 

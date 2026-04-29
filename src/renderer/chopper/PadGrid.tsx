@@ -20,7 +20,9 @@ export function PadGrid({ state, onTrigger, onRelease, onSelect, onToggleMode, o
   useEffect(() => {
     const isTyping = (e: KeyboardEvent) => {
       const t = e.target;
-      return t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement;
+      return (t instanceof HTMLInputElement && (t as HTMLInputElement).type !== 'range')
+        || t instanceof HTMLTextAreaElement
+        || t instanceof HTMLSelectElement;
     };
     const heldKeys = new Set<string>();
     const onDown = (e: KeyboardEvent) => {
